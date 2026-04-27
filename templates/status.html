@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OSM Lab – Status</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root { --bg: #0f172a; --surface: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #64748b; --accent: #38bdf8; }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; margin: 0; }
+    .navbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: .75rem 1.5rem; display: flex; align-items: center; justify-content: space-between; }
+    .navbar-brand { font-size: 1.1rem; font-weight: 700; color: var(--accent); text-decoration: none; }
+    .nav-link { color: var(--muted); text-decoration: none; font-size: .9rem; margin-left: 1.5rem; }
+    .nav-link:hover { color: var(--text); }
+    .page { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1.5rem; }
+
+    .svc-grid { display: grid; gap: .875rem; }
+    .svc-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; display: flex; align-items: flex-start; gap: 1rem; }
+    .svc-card.ok    { border-left: 4px solid #22c55e; }
+    .svc-card.warn  { border-left: 4px solid #f59e0b; }
+    .svc-card.error { border-left: 4px solid #ef4444; }
+
+    .dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; margin-top: .35rem; }
+    .dot-ok    { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+    .dot-warn  { background: #f59e0b; }
+    .dot-error { background: #ef4444; }
+
+    .svc-name { font-weight: 700; font-size: 1rem; }
+    .svc-meta { font-size: .8rem; color: var(--muted); margin-top: .2rem; }
+    .svc-detail { font-size: .8rem; color: #94a3b8; margin-top: .3rem; }
+
+    .progress-bar-wrap { background: #0f172a; border-radius: 4px; height: 6px; margin-top: .5rem; overflow: hidden; }
+    .progress-bar-fill { height: 100%; border-radius: 4px; transition: width .5s; }
+    .progress-bar-fill.ready     { background: #22c55e; width: 100%; }
+    .progress-bar-fill.importing { background: #f59e0b; width: 60%; }
+    .progress-bar-fill.starting  { background: #38bdf8; width: 20%; }
+    .progress-bar-fill.other     { background: #475569; width: 5%; }
+
+    .badge-docker { display: inline-block; font-size: .67rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+                    border-radius: 4px; padding: .1em .5em; margin-left: .5rem; vertical-align: middle; }
+    .badge-running { background: #14532d; color: #86efac; }
+    .badge-exited  { background: #450a0a; color: #fca5a5; }
+    .badge-other   { background: #1c1917; color: #a8a29e; }
+
+    .refresh-info { font-size: .78rem; color: var(--muted); margin-bottom: 1rem; }
+    .btn-refresh { background: #334155; color: var(--text); border: none; border-radius: 6px; padding: .4rem .9rem; font-size: .85rem; cursor: pointer; }
+    .btn-refresh:hover { background: #475569; }
+
+    .spinner { display: none; width: 18px; height: 18px; border: 2px solid #334155; border-top-color: var(--accent);
+               border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-left: .5rem; }
+    .spinner.active { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .last-updated { font-size: .75rem; color: var(--muted); margin-top: 1.5rem; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar">
+  <a class="navbar-brand" href="/">⬡ Jarvis OSM Lab</a>
+  <div>
+    <a class="nav-link d-inline" href="/">Suche</a>
+    <a class="nav-link d-inline" href="/status">Status</a>
+  </div>
+</nav>
+
+<div class="page">
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem;">
+    <h1 style="margin:0;">Service-Status</h1>
+    <div>
+      <button class="btn-refresh" onclick="load()">Aktualisieren</button>
+      <span class="spinner" id="spin"></span>
+    </div>
+  </div>
+
+  <div class="refresh-info">Wird alle 15 Sekunden automatisch aktualisiert.</div>
+
+  <div class="svc-grid" id="grid">
+    <div style="color:var(--muted); font-size:.9rem;">Lade…</div>
+  </div>
+
+  <div class="last-updated" id="lastUpdated"></div>
+</div>
+
+<script>
+const PHASE_LABEL = {
+  ready:     "Import abgeschlossen – Nominatim bereit",
+  importing: "Import läuft…",
+  starting:  "Container startet…",
+  running:   "Container läuft, HTTP noch nicht erreichbar",
+  error:     "Fehler",
+  unknown:   "Unbekannt",
+};
+
+function dockerBadge(state) {
+  const cls = state === "running" ? "badge-running" : state === "exited" ? "badge-exited" : "badge-other";
+  return `<span class="badge-docker ${cls}">${state}</span>`;
+}
+
+function dotClass(httpOk, docker) {
+  if (docker !== "running") return "dot-error";
+  if (httpOk) return "dot-ok";
+  return "dot-warn";
+}
+function cardClass(httpOk, docker) {
+  if (docker !== "running") return "error";
+  if (httpOk) return "ok";
+  return "warn";
+}
+
+function nomProgress(nom) {
+  if (!nom) return "";
+  const phase = nom.phase || "unknown";
+  const label = PHASE_LABEL[phase] || phase;
+  const barClass = ["ready","importing","starting"].includes(phase) ? phase : "other";
+  return `
+    <div class="svc-detail">${esc(label)}</div>
+    ${nom.detail && nom.detail !== label ? `<div class="svc-detail" style="color:#64748b; font-size:.75rem;">${esc(nom.detail)}</div>` : ""}
+    <div class="progress-bar-wrap"><div class="progress-bar-fill ${barClass}"></div></div>
+  `;
+}
+
+function render(data) {
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+  (data.services || []).forEach(svc => {
+    const dc = dotClass(svc.http_ok, svc.docker);
+    const cc = cardClass(svc.http_ok, svc.docker);
+    const httpStatus = svc.http_ok
+      ? `<span style="color:#22c55e">HTTP ${svc.http_code} OK</span>`
+      : svc.http_code === 0
+        ? `<span style="color:#ef4444">nicht erreichbar</span>`
+        : `<span style="color:#f59e0b">HTTP ${svc.http_code}</span>`;
+
+    const card = document.createElement("div");
+    card.className = `svc-card ${cc}`;
+    card.innerHTML = `
+      <div class="dot ${dc}" title="${dc}"></div>
+      <div style="flex:1;">
+        <div class="svc-name">${esc(svc.name)} ${dockerBadge(svc.docker)}</div>
+        <div class="svc-meta">${httpStatus}</div>
+        ${svc.nominatim ? nomProgress(svc.nominatim) : ""}
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+async function load() {
+  document.getElementById("spin").classList.add("active");
+  try {
+    const res = await fetch("/api/status");
+    const data = await res.json();
+    render(data);
+    document.getElementById("lastUpdated").textContent =
+      "Zuletzt aktualisiert: " + new Date().toLocaleTimeString("de-DE");
+  } catch(e) {
+    document.getElementById("grid").innerHTML =
+      '<div style="color:#ef4444;">Fehler beim Laden der Status-Daten.</div>';
+  } finally {
+    document.getElementById("spin").classList.remove("active");
+  }
+}
+
+function esc(str) {
+  return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+load();
+setInterval(load, 15000);
+</script>
+
+</body>
+</html>

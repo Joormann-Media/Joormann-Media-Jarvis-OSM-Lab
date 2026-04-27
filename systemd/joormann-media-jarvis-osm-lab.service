@@ -1,0 +1,19 @@
+[Unit]
+Description=Joormann Media Jarvis OSM Lab
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=forking
+User=__SERVICE_USER__
+WorkingDirectory=__PROJECT_ROOT__
+ExecStart=__PROJECT_ROOT__/scripts/start-dev.sh
+ExecStop=__PROJECT_ROOT__/scripts/stop-dev.sh
+PIDFile=__PROJECT_ROOT__/runtime/logs/jarvis-osm-lab.pid
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
