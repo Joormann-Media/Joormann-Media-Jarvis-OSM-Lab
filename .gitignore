@@ -1,8 +1,37 @@
-.venv/
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
+venv/
+.venv/
+*.egg-info/
+
+# ── Env overrides ─────────────────────────────────────────────────────────────
 .env
 config/ports.local.env
-runtime/logs/*.log
-runtime/logs/*.pid
+config/osm.env.bak*
+
+# docker/.env wird vom Setup als Symlink auf ../config/osm.env erzeugt
+docker/.env
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+runtime/logs/
+runtime/*.pid
+*.log
+
+# ── TileServer: Fonts (binäre PBF-Glyph-Dateien, ~8 MB) ─────────────────────
+docker/tileserver/fonts/
+
+# ── GraphHopper: Graph-Cache und importierte PBF ─────────────────────────────
+docker/graphhopper/data/
+
+# ── ORS: Laufzeit-Daten (Graphen, Logs, importierte Dateien) ─────────────────
+docker/ors/ors-docker/graphs/
+docker/ors/ors-docker/logs/
+docker/ors/ors-docker/files/*.pbf
+docker/ors/ors-docker/files/*.gz
+docker/ors/ors-docker/files/*.osm.pbf
+
+# ── Backup-Dateien ────────────────────────────────────────────────────────────
+docker/docker-compose.yml.bak-*
+config/osm.env.bak-*

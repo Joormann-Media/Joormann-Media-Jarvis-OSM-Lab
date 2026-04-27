@@ -1,0 +1,19 @@
+{
+  "options": {
+    "paths": {
+      "root": "/data",
+      "styles": "styles",
+      "fonts": "fonts"
+    }
+  },
+  "data": {
+    "germany": {
+      "mbtiles": "germany.mbtiles"
+    }
+  },
+  "styles": {
+    "osm-bright": {
+      "style": "osm-bright/style.json"
+    }
+  }
+}

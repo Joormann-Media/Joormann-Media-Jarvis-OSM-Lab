@@ -13,31 +13,26 @@
     }
     body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; margin: 0; }
 
-    /* Navbar */
     .navbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: .75rem 1.5rem; display: flex; align-items: center; justify-content: space-between; }
     .navbar-brand { font-size: 1.1rem; font-weight: 700; color: var(--accent); text-decoration: none; }
     .nav-link { color: var(--muted); text-decoration: none; font-size: .9rem; margin-left: 1.5rem; }
     .nav-link:hover, .nav-link.active { color: var(--text); }
 
-    /* Layout */
     .page { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
     h2 { font-size: 1.4rem; font-weight: 700; margin: 0 0 .25rem; }
     .subtitle { color: var(--muted); font-size: .85rem; margin-bottom: 2rem; }
 
-    /* Summary bar */
     .summary-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
                    padding: 1rem 1.25rem; display: flex; align-items: center; gap: 1.25rem; margin-bottom: 2rem; }
     .summary-count { font-size: 1.5rem; font-weight: 800; }
     .summary-label { font-size: .8rem; color: var(--muted); }
-    .summary-ok    { color: var(--ok); }
-    .summary-warn  { color: var(--warn); }
+    .summary-ok  { color: var(--ok); }
+    .summary-warn{ color: var(--warn); }
 
-    /* Section */
     .section { margin-bottom: 2rem; }
     .section-title { font-size: .7rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
                      color: var(--muted); margin-bottom: .75rem; padding-bottom: .4rem; border-bottom: 1px solid var(--border); }
 
-    /* Check row */
     .check-row { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
                  padding: .8rem 1rem; margin-bottom: .5rem; display: flex; align-items: center; gap: .85rem; }
     .check-row.ok    { border-left: 3px solid var(--ok); }
@@ -53,7 +48,16 @@
     .check-sub   { font-size: .76rem; color: var(--muted); margin-top: .1rem; }
     .check-size  { font-size: .75rem; color: #475569; margin-left: .5rem; white-space: nowrap; font-family: monospace; }
 
-    /* Buttons */
+    /* Install-path card */
+    .path-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+                 padding: 1rem 1.25rem; margin-bottom: .75rem; }
+    .path-row  { display: flex; gap: .5rem; align-items: center; margin-top: .6rem; flex-wrap: wrap; }
+    .path-input { flex: 1; min-width: 220px; background: #0a1120; border: 1px solid var(--border);
+                  color: var(--text); border-radius: 6px; padding: .38rem .75rem;
+                  font-size: .88rem; font-family: monospace; }
+    .path-input:focus { outline: none; border-color: var(--accent); }
+    .save-status { font-size: .8rem; color: var(--ok); margin-left: .25rem; }
+
     .btn-run { background: #1e3a5f; color: var(--accent); border: 1px solid #2a527a; border-radius: 6px;
                padding: .3rem .8rem; font-size: .8rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
     .btn-run:hover { background: #254b73; }
@@ -65,43 +69,37 @@
               padding: .3rem .8rem; font-size: .8rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
     .btn-ok:hover { background: #1a6637; }
 
-    /* Docker controls row */
     .docker-controls { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
                        padding: .9rem 1rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
     .docker-label { font-weight: 600; font-size: .9rem; flex: 1; min-width: 120px; }
 
-    /* Log terminal */
     .log-wrap { display: none; margin-top: .5rem; }
     .log-wrap.visible { display: block; }
     .log-term { background: #060d18; border: 1px solid var(--border); border-radius: 8px;
                 font-family: 'JetBrains Mono', 'Fira Mono', monospace; font-size: .78rem;
                 line-height: 1.55; color: #94a3b8; padding: .75rem 1rem;
                 min-height: 120px; max-height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
-    .log-line-ok   { color: #86efac; }
-    .log-line-err  { color: #fca5a5; }
+    .log-line-ok  { color: #86efac; }
+    .log-line-err { color: #fca5a5; }
 
-    /* Progress bar */
     .dl-progress { margin-top: .5rem; display: none; }
     .dl-progress.visible { display: block; }
-    .dl-bar-bg { background: #1e293b; border-radius: 4px; height: 8px; overflow: hidden; }
+    .dl-bar-bg   { background: #1e293b; border-radius: 4px; height: 8px; overflow: hidden; }
     .dl-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; width: 0; transition: width .3s; }
-    .dl-label { font-size: .75rem; color: var(--muted); margin-top: .3rem; text-align: right; }
+    .dl-label    { font-size: .75rem; color: var(--muted); margin-top: .3rem; text-align: right; }
 
-    /* Note box */
     .note-box { background: #1a2540; border: 1px solid #2a4070; border-radius: 8px;
                 padding: .75rem 1rem; font-size: .82rem; color: #93c5fd; margin-top: .5rem; }
     .note-box code { background: #0f1f3d; border-radius: 3px; padding: .1em .4em; font-size: .85em; }
 
-    /* Spinner */
-    .spin { display: none; width: 14px; height: 14px; border: 2px solid #334155; border-top-color: var(--accent);
-            border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
-    .spin.active { display: inline-block; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* Refresh button */
     .btn-refresh { background: #1e293b; color: var(--muted); border: 1px solid var(--border); border-radius: 6px;
                    padding: .35rem .8rem; font-size: .8rem; cursor: pointer; }
     .btn-refresh:hover { color: var(--text); border-color: #475569; }
+
+    .dirs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; margin-top: .6rem; }
+    .dir-chip  { background: #0a1626; border: 1px solid var(--border); border-radius: 6px;
+                 padding: .3rem .65rem; font-size: .75rem; font-family: monospace; display: flex; gap: .4rem; align-items: center; }
+    .dir-chip .dot { width: 7px; height: 7px; flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -118,7 +116,7 @@
 <div class="page">
   <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:1.5rem;">
     <div>
-      <h2>Setup & Installation</h2>
+      <h2>Setup &amp; Installation</h2>
       <div class="subtitle">Alle Komponenten auf einen Blick – prüfen, installieren, starten.</div>
     </div>
     <button class="btn-refresh" onclick="loadState()">↻ Aktualisieren</button>
@@ -139,6 +137,38 @@
     <div id="summaryMsg" style="font-size:.85rem; color:var(--muted);"></div>
   </div>
 
+  <!-- ── 0. Installations-Pfad ──────────────────────────────────── -->
+  <div class="section">
+    <div class="section-title">0 · Installations-Pfad (Datenlaufwerk)</div>
+
+    <div class="path-card">
+      <div class="check-label">OSM_DATA_ROOT</div>
+      <div class="check-sub">
+        Pfad zum großen Laufwerk, auf dem alle Laufzeit-Daten gespeichert werden:<br>
+        Docker-Volumes, PBF-Importdatei, GraphHopper-Graph, MBTiles, etc.
+      </div>
+      <div class="path-row">
+        <input type="text" id="input-data-root" class="path-input" placeholder="/mnt/data_toshiba">
+        <button class="btn-run" onclick="saveConfig()">Speichern</button>
+        <span id="save-status" class="save-status"></span>
+      </div>
+      <div style="margin-top:.75rem;">
+        <div style="font-size:.75rem; color:var(--muted); margin-bottom:.4rem;">Verzeichnisse auf dem Datenlaufwerk:</div>
+        <div class="dirs-grid" id="dirs-grid">
+          <div class="dir-chip"><div class="dot dot-warn"></div><span>Lade…</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:.5rem; display:flex; gap:.5rem; flex-wrap:wrap;">
+      <button class="btn-run" onclick="runStep('create-dirs','log-dirs')">Verzeichnisse erstellen</button>
+    </div>
+    <div class="log-wrap" id="log-dirs-wrap">
+      <div class="log-term" id="log-dirs"></div>
+      <div class="dl-progress" id="prog-log-dirs"><div class="dl-bar-bg"><div class="dl-bar-fill"></div></div><div class="dl-label"></div></div>
+    </div>
+  </div>
+
   <!-- ── 1. Docker ─────────────────────────────────────────────────── -->
   <div class="section">
     <div class="section-title">1 · Voraussetzungen</div>
@@ -149,7 +179,6 @@
         <div class="check-label">Docker Engine</div>
         <div class="check-sub" id="sub-docker">Prüfe…</div>
       </div>
-      <div class="spin" id="spin-docker"></div>
       <button class="btn-run" id="btn-install-docker" onclick="runStep('install-docker','log-docker')" style="display:none">
         Installieren
       </button>
@@ -179,22 +208,14 @@
     </div>
   </div>
 
-  <!-- ── 2. Verzeichnisse & Configs ────────────────────────────────── -->
+  <!-- ── 2. Konfigurationsdateien (aus Repo) ───────────────────── -->
   <div class="section">
-    <div class="section-title">2 · Verzeichnisse &amp; Konfiguration</div>
-
-    <div class="check-row" id="row-compose-dir">
-      <div class="dot dot-warn" id="dot-compose-dir"></div>
-      <div style="flex:1">
-        <div class="check-label">Compose-Verzeichnis</div>
-        <div class="check-sub" id="sub-compose-dir">Prüfe…</div>
-      </div>
-    </div>
+    <div class="section-title">2 · Konfigurationsdateien (aus Repo)</div>
 
     <div class="check-row" id="row-compose-yml">
       <div class="dot dot-warn" id="dot-compose-yml"></div>
       <div style="flex:1">
-        <div class="check-label">docker-compose.yml</div>
+        <div class="check-label">docker/docker-compose.yml</div>
         <div class="check-sub" id="sub-compose-yml">Prüfe…</div>
       </div>
     </div>
@@ -202,7 +223,7 @@
     <div class="check-row" id="row-ors-config">
       <div class="dot dot-warn" id="dot-ors-config"></div>
       <div style="flex:1">
-        <div class="check-label">ORS ors-config.yml</div>
+        <div class="check-label">docker/ors/…/ors-config.yml</div>
         <div class="check-sub" id="sub-ors-config">Prüfe…</div>
       </div>
     </div>
@@ -210,18 +231,33 @@
     <div class="check-row" id="row-vroom-config">
       <div class="dot dot-warn" id="dot-vroom-config"></div>
       <div style="flex:1">
-        <div class="check-label">Vroom config.yml</div>
+        <div class="check-label">docker/vroom/config.yml</div>
         <div class="check-sub" id="sub-vroom-config">Prüfe…</div>
       </div>
     </div>
 
-    <div style="margin-top:.75rem; display:flex; gap:.5rem; flex-wrap:wrap;">
-      <button class="btn-run" onclick="runStep('create-dirs','log-dirs')">Verzeichnisse erstellen</button>
-      <button class="btn-run" onclick="runStep('gen-configs','log-dirs')">Configs generieren</button>
+    <div class="check-row" id="row-gh-config">
+      <div class="dot dot-warn" id="dot-gh-config"></div>
+      <div style="flex:1">
+        <div class="check-label">docker/graphhopper/config.yml</div>
+        <div class="check-sub" id="sub-gh-config">Prüfe…</div>
+      </div>
     </div>
-    <div class="log-wrap" id="log-dirs-wrap">
-      <div class="log-term" id="log-dirs"></div>
-      <div class="dl-progress" id="prog-log-dirs"><div class="dl-bar-bg"><div class="dl-bar-fill"></div></div><div class="dl-label"></div></div>
+
+    <div class="check-row" id="row-ts-styles">
+      <div class="dot dot-warn" id="dot-ts-styles"></div>
+      <div style="flex:1">
+        <div class="check-label">docker/tileserver/styles/osm-bright</div>
+        <div class="check-sub" id="sub-ts-styles">Prüfe…</div>
+      </div>
+    </div>
+
+    <div style="margin-top:.75rem;">
+      <button class="btn-run" onclick="runStep('check-configs','log-cfg')">Konfigurationen prüfen</button>
+    </div>
+    <div class="log-wrap" id="log-cfg-wrap">
+      <div class="log-term" id="log-cfg"></div>
+      <div class="dl-progress" id="prog-log-cfg"><div class="dl-bar-bg"><div class="dl-bar-fill"></div></div><div class="dl-label"></div></div>
     </div>
   </div>
 
@@ -233,7 +269,7 @@
       <div class="dot dot-warn" id="dot-nom-pbf"></div>
       <div style="flex:1">
         <div class="check-label">NRW PBF <span class="check-size" id="size-nom-pbf"></span></div>
-        <div class="check-sub" id="sub-nom-pbf">Nominatim-Importdatei</div>
+        <div class="check-sub" id="sub-nom-pbf">Haupt-Importdatei (in osm-import/ auf dem Datenlaufwerk)</div>
       </div>
       <button class="btn-run" id="btn-dl-pbf" onclick="runStep('download-pbf','log-pbf')">Herunterladen</button>
     </div>
@@ -250,7 +286,7 @@
       <div class="dot dot-warn" id="dot-ors-pbf"></div>
       <div style="flex:1">
         <div class="check-label">ORS PBF <span class="check-size" id="size-ors-pbf"></span></div>
-        <div class="check-sub" id="sub-ors-pbf">Symlink oder Kopie von NRW PBF (wird beim PBF-Download automatisch erstellt)</div>
+        <div class="check-sub" id="sub-ors-pbf">Symlink → NRW PBF (wird beim Download automatisch erstellt)</div>
       </div>
     </div>
 
@@ -258,7 +294,7 @@
       <div class="dot dot-warn" id="dot-gh-pbf"></div>
       <div style="flex:1">
         <div class="check-label">GraphHopper PBF <span class="check-size" id="size-gh-pbf"></span></div>
-        <div class="check-sub" id="sub-gh-pbf">Symlink oder Kopie von NRW PBF (wird beim PBF-Download automatisch erstellt)</div>
+        <div class="check-sub" id="sub-gh-pbf">Symlink → NRW PBF (wird beim Download automatisch erstellt)</div>
       </div>
     </div>
 
@@ -281,17 +317,9 @@
 
     <div class="note-box" id="mbtiles-note" style="display:none;">
       MBTiles-URL nicht konfiguriert. Entweder:<br>
-      • <code>MBTILES_URL=https://…</code> in <code>config/osm.env</code> eintragen, oder<br>
+      • <code>MBTILES_URL=https://…</code> oben im Feld "MBTILES_URL" eintragen und speichern, oder<br>
       • Datei manuell herunterladen und nach <code id="mbtiles-path"></code> kopieren.<br>
-      Quellen: <strong>MapTiler Data</strong> (kostenlos für OSM) oder eigene Tilemaker-Generierung aus dem NRW-PBF.
-    </div>
-
-    <div class="check-row" id="row-ts-styles">
-      <div class="dot dot-warn" id="dot-ts-styles"></div>
-      <div style="flex:1">
-        <div class="check-label">TileServer Styles (osm-bright)</div>
-        <div class="check-sub" id="sub-ts-styles">Prüfe…</div>
-      </div>
+      Quelle: <strong>MapTiler Data</strong> (kostenlos für OSM) oder Tilemaker aus dem NRW-PBF generieren.
     </div>
   </div>
 
@@ -312,11 +340,44 @@
       <div class="log-term" id="log-docker-stack"></div>
       <div class="dl-progress" id="prog-log-docker-stack"><div class="dl-bar-bg"><div class="dl-bar-fill"></div></div><div class="dl-label"></div></div>
     </div>
+
+    <div class="note-box" style="margin-top:.75rem;">
+      Der Stack wird gestartet mit:<br>
+      <code>docker compose -f docker/docker-compose.yml --env-file config/osm.env up -d</code><br>
+      Manuell aus dem Repo-Verzeichnis ausführbar (nach Erstellen des Symlinks via "Verzeichnisse erstellen").
+    </div>
   </div>
 
 </div><!-- /page -->
 
 <script>
+// ── Config speichern ──────────────────────────────────────────────────────────
+async function saveConfig() {
+  const root   = document.getElementById("input-data-root").value.trim();
+  const status = document.getElementById("save-status");
+  if (!root) { status.textContent = "Kein Pfad eingegeben"; status.style.color = "var(--err)"; return; }
+  status.textContent = "Speichere…"; status.style.color = "var(--muted)";
+  try {
+    const res = await fetch("/api/setup/save-config", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({osm_data_root: root})
+    });
+    const d = await res.json();
+    if (d.ok) {
+      status.textContent = "✓ Gespeichert";
+      status.style.color = "var(--ok)";
+      setTimeout(loadState, 300);
+    } else {
+      status.textContent = "Fehler: " + (d.error || "unbekannt");
+      status.style.color = "var(--err)";
+    }
+  } catch(e) {
+    status.textContent = "Fehler: " + e;
+    status.style.color = "var(--err)";
+  }
+}
+
 // ── State loader ──────────────────────────────────────────────────────────────
 async function loadState() {
   try {
@@ -331,6 +392,29 @@ async function loadState() {
 function applyState(s) {
   let ok = 0, miss = 0;
 
+  // Install path
+  const rootInput = document.getElementById("input-data-root");
+  if (s.osm_data_root && !rootInput.matches(":focus")) {
+    rootInput.value = s.osm_data_root;
+  }
+
+  // Data dirs
+  const dirsGrid = document.getElementById("dirs-grid");
+  if (s.data_dirs) {
+    const labels = {
+      osm_import:     "osm-import/",
+      nominatim_data: "nominatim-data/",
+      overpass_data:  "overpass-data/",
+      gh_data:        "graphhopper/",
+      ors_data:       "ors/",
+      mbtiles_dir:    "mbtiles/",
+    };
+    dirsGrid.innerHTML = Object.entries(labels).map(([key, label]) => {
+      const exists = s.data_dirs[key];
+      return `<div class="dir-chip"><div class="dot ${exists ? 'dot-ok' : 'dot-error'}"></div><span>${esc(label)}</span></div>`;
+    }).join("");
+  }
+
   function setRow(rowId, dotId, subId, isOk, sub, sizeEl, sizeMb) {
     const row = document.getElementById(rowId);
     const dot = document.getElementById(dotId);
@@ -344,22 +428,20 @@ function applyState(s) {
   }
 
   // Docker
-  const dockerOk = s.docker?.ok;
+  const dockerOk  = s.docker?.ok;
   const dockerBin = s.docker?.bin;
-  const dockerRow = document.getElementById("row-docker");
-  const dockerDot = document.getElementById("dot-docker");
-  const dockerSub = document.getElementById("sub-docker");
   const subMap = {
     true:          ["ok",    "Docker Engine verfügbar" + (dockerBin ? " (" + dockerBin + ")" : "")],
     "no-permission":["warn", "Docker installiert, aber Benutzer nicht in docker-Gruppe"],
-    "no-daemon":   ["warn",  "Docker installiert, aber Daemon nicht gestartet (sudo systemctl start docker)"],
-    "error":       ["error", "Docker vorhanden, aber Fehler bei Verbindung"],
+    "no-daemon":   ["warn",  "Docker installiert, aber Daemon nicht gestartet"],
+    "error":       ["error", "Docker vorhanden, aber Verbindungsfehler"],
     "false":       ["error", "Docker nicht gefunden"],
   };
-  const [cls, txt] = subMap[String(dockerOk)] || ["error", "Unbekannter Fehler"];
+  const [cls, txt] = subMap[String(dockerOk)] || ["error", "Unbekannt"];
+  const dockerRow = document.getElementById("row-docker");
   dockerRow.className = "check-row " + cls;
-  dockerDot.className = "dot dot-" + cls;
-  dockerSub.textContent = txt;
+  document.getElementById("dot-docker").className = "dot dot-" + cls;
+  document.getElementById("sub-docker").textContent = txt;
   if (dockerOk === true) ok++; else miss++;
 
   document.getElementById("btn-install-docker").style.display = (!dockerBin) ? "" : "none";
@@ -371,15 +453,18 @@ function applyState(s) {
   setRow("row-dc","dot-dc","sub-dc", dcOk,
     dcOk ? (s.docker_compose.version || "Docker Compose verfügbar") : "docker compose nicht gefunden");
 
-  // Dirs / configs
-  setRow("row-compose-dir","dot-compose-dir","sub-compose-dir",
-    s.compose_dir?.ok, s.compose_dir?.path);
+  // Configs (aus Repo)
   setRow("row-compose-yml","dot-compose-yml","sub-compose-yml",
-    s.compose_yml?.ok, s.compose_yml?.ok ? s.compose_yml.path : "Nicht vorhanden – mit 'Configs generieren' erstellen");
+    s.compose_yml?.ok, s.compose_yml?.ok ? s.compose_yml.path : "docker/docker-compose.yml fehlt – Repo vollständig geklont?");
   setRow("row-ors-config","dot-ors-config","sub-ors-config",
-    s.ors_config?.ok, s.ors_config?.ok ? s.ors_config.path : "Nicht vorhanden – mit 'Configs generieren' erstellen");
+    s.ors_config?.ok, s.ors_config?.ok ? s.ors_config.path : "ors-config.yml fehlt");
   setRow("row-vroom-config","dot-vroom-config","sub-vroom-config",
-    s.vroom_config?.ok, s.vroom_config?.ok ? s.vroom_config.path : "Nicht vorhanden – mit 'Configs generieren' erstellen");
+    s.vroom_config?.ok, s.vroom_config?.ok ? s.vroom_config.path : "vroom/config.yml fehlt");
+  setRow("row-gh-config","dot-gh-config","sub-gh-config",
+    s.gh_config?.ok, s.gh_config?.ok ? s.gh_config.path : "graphhopper/config.yml fehlt");
+  setRow("row-ts-styles","dot-ts-styles","sub-ts-styles",
+    s.ts_styles?.ok,
+    s.ts_styles?.ok ? s.ts_styles.path : "osm-bright/style.json fehlt – Styles in docker/tileserver/styles/ ablegen");
 
   // Data files
   setRow("row-nom-pbf","dot-nom-pbf","sub-nom-pbf",
@@ -389,16 +474,12 @@ function applyState(s) {
 
   setRow("row-ors-pbf","dot-ors-pbf","sub-ors-pbf",
     s.ors_pbf?.ok,
-    s.ors_pbf?.ok
-      ? s.ors_pbf.path + (s.ors_pbf.symlink ? " (Symlink)" : "")
-      : "Wird beim PBF-Download automatisch als Symlink erstellt",
+    s.ors_pbf?.ok ? s.ors_pbf.path + (s.ors_pbf.symlink ? " (Symlink)" : "") : "Wird beim PBF-Download automatisch erstellt",
     "size-ors-pbf", s.ors_pbf?.size_mb);
 
   setRow("row-gh-pbf","dot-gh-pbf","sub-gh-pbf",
     s.graphhopper_pbf?.ok,
-    s.graphhopper_pbf?.ok
-      ? s.graphhopper_pbf.path + (s.graphhopper_pbf.symlink ? " (Symlink)" : "")
-      : "Wird beim PBF-Download automatisch als Symlink erstellt",
+    s.graphhopper_pbf?.ok ? s.graphhopper_pbf.path + (s.graphhopper_pbf.symlink ? " (Symlink)" : "") : "Wird beim PBF-Download automatisch erstellt",
     "size-gh-pbf", s.graphhopper_pbf?.size_mb);
 
   const mbtOk = s.mbtiles?.ok;
@@ -414,10 +495,6 @@ function applyState(s) {
   } else {
     mbtNote.style.display = "none";
   }
-
-  setRow("row-ts-styles","dot-ts-styles","sub-ts-styles",
-    s.ts_styles?.ok,
-    s.ts_styles?.ok ? s.ts_styles.path : "osm-bright/style.json fehlt – Styles in " + (s.ts_styles?.path || "") + " ablegen");
 
   // Summary
   document.getElementById("sumOk").textContent   = ok;
@@ -442,9 +519,9 @@ function runStep(step, logId) {
   const barFill = progEl?.querySelector(".dl-bar-fill");
   const barLabel= progEl?.querySelector(".dl-label");
 
-  if (logEl)  { logEl.textContent = ""; }
-  if (wrapEl) { wrapEl.classList.add("visible"); }
-  if (progEl) { progEl.classList.remove("visible"); }
+  if (logEl)  logEl.textContent = "";
+  if (wrapEl) wrapEl.classList.add("visible");
+  if (progEl) progEl.classList.remove("visible");
 
   const src = new EventSource("/api/setup/run/" + step);
 
@@ -452,11 +529,11 @@ function runStep(step, logId) {
     try {
       const d = JSON.parse(e.data);
 
-      if (d.t === "log") {
-        if (!logEl) return;
+      if (d.t === "log" && logEl) {
         const line = document.createElement("div");
         const msg = d.msg || "";
-        line.className = msg.startsWith("✓") ? "log-line-ok" : msg.startsWith("FEHLER") || msg.startsWith("Error") ? "log-line-err" : "";
+        line.className = msg.startsWith("✓") ? "log-line-ok"
+                       : (msg.startsWith("FEHLER") || msg.startsWith("Error")) ? "log-line-err" : "";
         line.textContent = msg;
         logEl.appendChild(line);
         logEl.scrollTop = logEl.scrollHeight;
@@ -464,7 +541,7 @@ function runStep(step, logId) {
 
       if (d.t === "progress" && progEl) {
         progEl.classList.add("visible");
-        if (barFill) barFill.style.width = d.pct + "%";
+        if (barFill)  barFill.style.width = d.pct + "%";
         if (barLabel) barLabel.textContent = `${d.done_mb} / ${d.total_mb} MB (${d.pct}%)`;
       }
 
@@ -495,7 +572,10 @@ function runStep(step, logId) {
   };
 }
 
-// ── Init ─────────────────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
 loadState();
 setInterval(loadState, 30000);
 </script>

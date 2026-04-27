@@ -1,0 +1,60 @@
+graphhopper:
+  datareader.file: /data/nordrhein-westfalen-latest.osm.pbf
+  graph.location: /data/default-gh
+
+  import.osm.ignored_highways: ""
+
+  graph.encoded_values: car_access,car_average_speed,country,road_class,roundabout,max_speed,foot_access,foot_average_speed,foot_priority,foot_road_access,hike_rating,average_slope,bike_access,bike_average_speed,bike_priority,bike_road_access,bike_network,mtb_rating,ferry_speed,road_environment
+
+  profiles:
+    - name: car
+      custom_model:
+        speed:
+          - if: "!car_access"
+            limit_to: 0
+          - else:
+            limit_to: "car_average_speed"
+        priority:
+          - if: "!car_access"
+            multiply_by: 0
+          - else:
+            multiply_by: 1
+
+    - name: foot
+      custom_model:
+        speed:
+          - if: "!foot_access"
+            limit_to: 0
+          - else:
+            limit_to: "foot_average_speed"
+        priority:
+          - if: "!foot_access"
+            multiply_by: 0
+          - else:
+            multiply_by: "foot_priority"
+
+    - name: bike
+      custom_model:
+        speed:
+          - if: "!bike_access"
+            limit_to: 0
+          - else:
+            limit_to: "bike_average_speed"
+        priority:
+          - if: "!bike_access"
+            multiply_by: 0
+          - else:
+            multiply_by: "bike_priority"
+
+  profiles_ch:
+    - profile: car
+
+server:
+  application_connectors:
+    - type: http
+      port: 8989
+      bind_host: 0.0.0.0
+  admin_connectors:
+    - type: http
+      port: 8990
+      bind_host: 0.0.0.0

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,28 +9,33 @@ import requests
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR   = Path(__file__).resolve().parent
 CONFIG_DIR = BASE_DIR / "config"
+DOCKER_DIR = BASE_DIR / "docker"
 
-for env_file in (CONFIG_DIR / "ports.env", CONFIG_DIR / "osm.env", BASE_DIR / ".env"):
-    if env_file.exists():
-        load_dotenv(env_file)
 
-FLASK_HOST = os.environ.get("FLASK_HOST", "0.0.0.0")
-FLASK_PORT = int(os.environ.get("FLASK_PORT", "5079"))
+def _load_env():
+    for env_file in (CONFIG_DIR / "ports.env", CONFIG_DIR / "osm.env", BASE_DIR / ".env"):
+        if env_file.exists():
+            load_dotenv(env_file, override=True)
+
+
+_load_env()
+
+FLASK_HOST  = os.environ.get("FLASK_HOST", "0.0.0.0")
+FLASK_PORT  = int(os.environ.get("FLASK_PORT", "5079"))
 FLASK_DEBUG = os.environ.get("FLASK_DEBUG", "0") == "1"
 
-NOMINATIM_URL      = os.environ.get("NOMINATIM_URL",      "http://localhost:7071").rstrip("/")
-ORS_URL            = os.environ.get("ORS_URL",            "http://localhost:8082").rstrip("/")
-GRAPHHOPPER_URL    = os.environ.get("GRAPHHOPPER_URL",    "http://localhost:8989").rstrip("/")
-TILESERVER_URL     = os.environ.get("TILESERVER_URL",     "http://localhost:8083").rstrip("/")
-VROOM_URL          = os.environ.get("VROOM_URL",          "http://localhost:8084").rstrip("/")
-OSM_COMPOSE_DIR    = os.environ.get("OSM_COMPOSE_DIR",    "/home/djanebmb/osm-neu")
-NOMINATIM_PBF_PATH = os.environ.get("NOMINATIM_PBF_PATH", "/mnt/HDD3/nominatim-nrw/import/nrw.osm.pbf")
-NOMINATIM_DATA_DIR = os.environ.get("NOMINATIM_DATA_DIR", "/mnt/HDD3/nominatim-nrw/import")
-GEOFABRIK_PBF_URL  = os.environ.get("GEOFABRIK_PBF_URL",
+NOMINATIM_URL     = os.environ.get("NOMINATIM_URL",     "http://localhost:7071").rstrip("/")
+ORS_URL           = os.environ.get("ORS_URL",           "http://localhost:8082").rstrip("/")
+GRAPHHOPPER_URL   = os.environ.get("GRAPHHOPPER_URL",   "http://localhost:8989").rstrip("/")
+TILESERVER_URL    = os.environ.get("TILESERVER_URL",    "http://localhost:8083").rstrip("/")
+VROOM_URL         = os.environ.get("VROOM_URL",         "http://localhost:8084").rstrip("/")
+OVERPASS_URL      = os.environ.get("OVERPASS_URL",      "http://localhost:7072").rstrip("/")
+OSM_DATA_ROOT     = os.environ.get("OSM_DATA_ROOT",     "/mnt/data_toshiba")
+GEOFABRIK_PBF_URL = os.environ.get("GEOFABRIK_PBF_URL",
     "https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf")
-MBTILES_URL        = os.environ.get("MBTILES_URL", "")
+MBTILES_URL       = os.environ.get("MBTILES_URL", "")
 
 TIMEOUT = 3
 
@@ -41,11 +47,12 @@ app = Flask(__name__)
 # ---------------------------------------------------------------------------
 
 SERVICES = [
-    {"key": "nominatim",   "name": "Nominatim (Geocoding)", "url": NOMINATIM_URL   + "/status.php",    "container": "nominatim-nrw"},
-    {"key": "ors",         "name": "OpenRouteService",       "url": ORS_URL         + "/ors/v2/health", "container": "ors-app"},
-    {"key": "graphhopper", "name": "GraphHopper",            "url": GRAPHHOPPER_URL + "/health",        "container": "graphhopper"},
-    {"key": "tileserver",  "name": "TileServer GL",          "url": TILESERVER_URL  + "/health",        "container": "tileserver"},
-    {"key": "vroom",       "name": "VROOM",                  "url": VROOM_URL       + "/health",        "container": "vroom"},
+    {"key": "nominatim",   "name": "Nominatim (Geocoding)", "url": lambda: NOMINATIM_URL   + "/status.php",        "container": "nominatim-nrw"},
+    {"key": "overpass",    "name": "Overpass API (POI)",    "url": lambda: OVERPASS_URL    + "/api/interpreter",   "container": "overpass-nrw"},
+    {"key": "ors",         "name": "OpenRouteService",       "url": lambda: ORS_URL         + "/ors/v2/health",     "container": "ors-app"},
+    {"key": "graphhopper", "name": "GraphHopper",            "url": lambda: GRAPHHOPPER_URL + "/health",            "container": "graphhopper"},
+    {"key": "tileserver",  "name": "TileServer GL",          "url": lambda: TILESERVER_URL  + "/health",            "container": "tileserver"},
+    {"key": "vroom",       "name": "VROOM",                  "url": lambda: VROOM_URL       + "/health",            "container": "vroom"},
 ]
 
 
@@ -89,7 +96,8 @@ def _nominatim_progress() -> dict:
 def _build_status() -> dict:
     services = []
     for svc in SERVICES:
-        ok, code = _http_ok(svc["url"])
+        url = svc["url"]() if callable(svc["url"]) else svc["url"]
+        ok, code = _http_ok(url)
         docker = _docker_state(svc["container"])
         entry = {"key": svc["key"], "name": svc["name"],
                  "http_ok": ok, "http_code": code, "docker": docker}
@@ -100,28 +108,32 @@ def _build_status() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Setup helpers
+# Path helpers  (alles relativ zu OSM_DATA_ROOT)
 # ---------------------------------------------------------------------------
 
 def _paths() -> dict:
-    d = Path(OSM_COMPOSE_DIR)
+    data = Path(OSM_DATA_ROOT)
     return {
-        "compose_dir":      d,
-        "compose_yml":      d / "docker-compose.yml",
-        "nominatim_import": Path(NOMINATIM_DATA_DIR),
-        "nominatim_pbf":    Path(NOMINATIM_PBF_PATH),
-        "ors_files":        d / "ors" / "ors-docker" / "files",
-        "ors_pbf":          d / "ors" / "ors-docker" / "files" / "osm_file.pbf",
-        "ors_config_dir":   d / "ors" / "ors-docker" / "config",
-        "ors_config":       d / "ors" / "ors-docker" / "config" / "ors-config.yml",
-        "ors_graphs":       d / "ors" / "ors-docker" / "graphs",
-        "gh_data":          d / "graphhopper" / "data",
-        "gh_pbf":           d / "graphhopper" / "data" / "nordrhein-westfalen-latest.osm.pbf",
-        "ts_data":          d / "tileserver",
-        "ts_config":        d / "tileserver" / "config.json",
-        "ts_styles":        d / "tileserver" / "styles" / "osm-bright",
-        "mbtiles":          d / "tileserver" / "germany.mbtiles",
-        "vroom_conf":       d / "vroom" / "config.yml",
+        # Docker-Stack (immer im Repo)
+        "docker_dir":    DOCKER_DIR,
+        "compose_yml":   DOCKER_DIR / "docker-compose.yml",
+        "env_link":      DOCKER_DIR / ".env",
+        "ors_config":    DOCKER_DIR / "ors" / "ors-docker" / "config" / "ors-config.yml",
+        "vroom_conf":    DOCKER_DIR / "vroom" / "config.yml",
+        "gh_config":     DOCKER_DIR / "graphhopper" / "config.yml",
+        "ts_config":     DOCKER_DIR / "tileserver" / "config.json",
+        "ts_styles":     DOCKER_DIR / "tileserver" / "styles" / "osm-bright",
+        # Laufzeit-Daten (auf dem Daten-Laufwerk)
+        "osm_import":    data / "osm-import",
+        "nominatim_pbf": data / "osm-import" / "nrw.osm.pbf",
+        "nominatim_data":data / "nominatim-data",
+        "overpass_data": data / "overpass-data",
+        "gh_data":       data / "graphhopper",
+        "gh_pbf":        data / "graphhopper" / "nordrhein-westfalen-latest.osm.pbf",
+        "ors_data":      data / "ors",
+        "ors_pbf":       data / "ors" / "files" / "osm_file.pbf",
+        "mbtiles_dir":   data / "mbtiles",
+        "mbtiles":       data / "mbtiles" / "germany.mbtiles",
     }
 
 
@@ -140,7 +152,6 @@ def _finfo(path) -> dict:
 def _setup_state() -> dict:
     p = _paths()
 
-    # Docker: binary vorhanden + Daemon erreichbar
     docker_bin = shutil.which("docker")
     if docker_bin:
         try:
@@ -148,9 +159,9 @@ def _setup_state() -> dict:
             if r.returncode == 0:
                 docker_ok = True
             elif b"permission denied" in r.stderr:
-                docker_ok = "no-permission"   # binary + daemon, aber Benutzer fehlt in docker-Gruppe
+                docker_ok = "no-permission"
             elif b"no such file" in r.stderr or b"cannot connect" in r.stderr:
-                docker_ok = "no-daemon"       # binary da, daemon nicht gestartet
+                docker_ok = "no-daemon"
             else:
                 docker_ok = "error"
         except Exception:
@@ -158,29 +169,36 @@ def _setup_state() -> dict:
     else:
         docker_ok = False
 
-    # Docker Compose plugin
     try:
         r = subprocess.run(["docker", "compose", "version"], capture_output=True, text=True, timeout=5)
-        dc_ok = r.returncode == 0
+        dc_ok  = r.returncode == 0
         dc_ver = r.stdout.strip()[:80] if dc_ok else ""
     except Exception:
         dc_ok, dc_ver = False, ""
 
     return {
-        "docker":            {"ok": docker_ok, "bin": docker_bin},
-        "docker_compose":    {"ok": dc_ok, "version": dc_ver},
-        "compose_dir":       {"ok": p["compose_dir"].exists(),      "path": str(p["compose_dir"])},
-        "compose_yml":       _finfo(p["compose_yml"]),
-        "nominatim_dir":     {"ok": p["nominatim_import"].exists(), "path": str(p["nominatim_import"])},
-        "nominatim_pbf":     _finfo(p["nominatim_pbf"]),
-        "ors_pbf":           _finfo(p["ors_pbf"]),
-        "graphhopper_pbf":   _finfo(p["gh_pbf"]),
-        "mbtiles":           _finfo(p["mbtiles"]),
-        "ts_styles":         {"ok": (p["ts_styles"] / "style.json").exists(), "path": str(p["ts_styles"])},
-        "ors_config":        _finfo(p["ors_config"]),
-        "vroom_config":      _finfo(p["vroom_conf"]),
-        "geofabrik_url":     GEOFABRIK_PBF_URL,
-        "mbtiles_url":       MBTILES_URL,
+        "osm_data_root":   OSM_DATA_ROOT,
+        "docker":          {"ok": docker_ok, "bin": docker_bin},
+        "docker_compose":  {"ok": dc_ok, "version": dc_ver},
+        "compose_yml":     _finfo(p["compose_yml"]),
+        "ors_config":      _finfo(p["ors_config"]),
+        "vroom_config":    _finfo(p["vroom_conf"]),
+        "gh_config":       _finfo(p["gh_config"]),
+        "ts_styles":       {"ok": (p["ts_styles"] / "style.json").exists(), "path": str(p["ts_styles"])},
+        "nominatim_pbf":   _finfo(p["nominatim_pbf"]),
+        "ors_pbf":         _finfo(p["ors_pbf"]),
+        "graphhopper_pbf": _finfo(p["gh_pbf"]),
+        "mbtiles":         _finfo(p["mbtiles"]),
+        "data_dirs": {
+            "osm_import":     p["osm_import"].exists(),
+            "nominatim_data": p["nominatim_data"].exists(),
+            "overpass_data":  p["overpass_data"].exists(),
+            "gh_data":        p["gh_data"].exists(),
+            "ors_data":       p["ors_data"].exists(),
+            "mbtiles_dir":    p["mbtiles_dir"].exists(),
+        },
+        "geofabrik_url":   GEOFABRIK_PBF_URL,
+        "mbtiles_url":     MBTILES_URL,
     }
 
 
@@ -208,8 +226,11 @@ def _done(ok: bool, msg: str = "") -> str:
 
 
 def _run_compose(args: list[str]):
-    p = _paths()
-    cmd = ["docker", "compose", "-f", str(p["compose_yml"])] + args
+    compose_yml = DOCKER_DIR / "docker-compose.yml"
+    env_file    = CONFIG_DIR / "osm.env"
+    cmd = ["docker", "compose",
+           "-f", str(compose_yml),
+           "--env-file", str(env_file)] + args
     yield _log("$ " + " ".join(cmd))
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -232,18 +253,31 @@ def _run_compose(args: list[str]):
 def _step_create_dirs():
     p = _paths()
     dirs = [
-        p["nominatim_import"],
-        p["compose_dir"],
-        p["ors_files"],
-        p["ors_config_dir"],
-        p["ors_graphs"],
+        p["osm_import"],
+        p["nominatim_data"],
+        p["overpass_data"],
         p["gh_data"],
-        p["ts_data"],
-        p["vroom_conf"].parent,
+        p["ors_data"] / "files",
+        p["ors_data"] / "graphs",
+        p["ors_data"] / "config",
+        p["ors_data"] / "logs",
+        p["mbtiles_dir"],
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
         yield _log(f"✓ {d}")
+
+    # docker/.env als Symlink auf ../config/osm.env damit manuelles
+    # 'docker compose' im docker/-Verzeichnis direkt funktioniert
+    env_link   = p["env_link"]
+    env_target = CONFIG_DIR / "osm.env"
+    if not env_link.exists():
+        try:
+            env_link.symlink_to(env_target)
+            yield _log(f"✓ docker/.env → {env_target}")
+        except Exception as e:
+            yield _log(f"WARN: docker/.env Symlink fehlgeschlagen: {e}")
+
     yield _done(True, "Verzeichnisse bereit")
 
 
@@ -288,10 +322,10 @@ def _step_download_pbf():
         yield _done(False, f"Download fehlgeschlagen: {e}")
         return
 
-    # Symlinks für ORS und GraphHopper
-    for link in [p["ors_pbf"], p["gh_pbf"]]:
+    # Symlinks für GraphHopper und ORS auf die eine PBF-Datei
+    for link in [p["gh_pbf"], p["ors_pbf"]]:
+        link.parent.mkdir(parents=True, exist_ok=True)
         if not link.exists():
-            link.parent.mkdir(parents=True, exist_ok=True)
             try:
                 link.symlink_to(pbf.resolve())
                 yield _log(f"✓ Symlink: {link}")
@@ -349,55 +383,37 @@ def _step_download_mbtiles():
         yield _done(False, f"Download fehlgeschlagen: {e}")
 
 
-def _step_generate_configs():
+def _step_check_configs():
     p = _paths()
+    all_ok = True
+    checks = [
+        (p["compose_yml"], "docker-compose.yml"),
+        (p["ors_config"],  "ORS ors-config.yml"),
+        (p["vroom_conf"],  "Vroom config.yml"),
+        (p["gh_config"],   "GraphHopper config.yml"),
+        (p["ts_config"],   "TileServer config.json"),
+    ]
+    for path, label in checks:
+        if path.exists():
+            yield _log(f"✓ {label}: {path}")
+        else:
+            yield _log(f"FEHLER: {label} fehlt: {path}")
+            all_ok = False
 
-    # ORS config
-    if not p["ors_config"].exists():
-        p["ors_config_dir"].mkdir(parents=True, exist_ok=True)
-        p["ors_config"].write_text(_ors_config_template())
-        yield _log(f"✓ ORS-Config erstellt: {p['ors_config']}")
+    style_json = p["ts_styles"] / "style.json"
+    if style_json.exists():
+        yield _log(f"✓ TileServer osm-bright/style.json: {style_json}")
     else:
-        yield _log(f"→ ORS-Config vorhanden: {p['ors_config']}")
+        yield _log(f"WARN: {style_json} fehlt – Tiles-Style muss manuell in docker/tileserver/styles/ abgelegt werden")
 
-    # TileServer config.json
-    if not p["ts_config"].exists():
-        p["ts_data"].mkdir(parents=True, exist_ok=True)
-        p["ts_config"].write_text(json.dumps({
-            "options": {"paths": {"root": "/data", "styles": "styles", "fonts": "fonts"}},
-            "data": {"germany": {"mbtiles": "germany.mbtiles"}},
-            "styles": {"osm-bright": {"style": "osm-bright/style.json"}},
-        }, indent=2))
-        yield _log(f"✓ TileServer config.json erstellt: {p['ts_config']}")
-    else:
-        yield _log(f"→ TileServer config.json vorhanden")
-
-    # Vroom config
-    if not p["vroom_conf"].exists():
-        p["vroom_conf"].parent.mkdir(parents=True, exist_ok=True)
-        p["vroom_conf"].write_text(_vroom_config_template())
-        yield _log(f"✓ Vroom config.yml erstellt: {p['vroom_conf']}")
-    else:
-        yield _log(f"→ Vroom config.yml vorhanden")
-
-    # docker-compose.yml
-    if not p["compose_yml"].exists():
-        p["compose_dir"].mkdir(parents=True, exist_ok=True)
-        p["compose_yml"].write_text(_compose_template())
-        yield _log(f"✓ docker-compose.yml erstellt: {p['compose_yml']}")
-    else:
-        yield _log(f"→ docker-compose.yml vorhanden: {p['compose_yml']}")
-
-    yield _done(True, "Konfigurationen bereit")
+    yield _done(all_ok, "" if all_ok else "Einige Konfigurationsdateien fehlen – Repository vollständig geklont?")
 
 
 def _step_install_docker():
-    # Prüft OS und führt das offizielle Install-Script aus
     yield _log("Erkenne Betriebssystem…")
     try:
         with open("/etc/os-release") as f:
-            os_info = f.read()
-        yield _log(os_info.strip()[:200])
+            yield _log(f.read().strip()[:200])
     except Exception:
         yield _log("WARNUNG: /etc/os-release nicht lesbar")
 
@@ -413,7 +429,6 @@ def _step_install_docker():
         proc.wait()
         ok = proc.returncode == 0
         if ok:
-            # Benutzer zur docker-Gruppe hinzufügen
             user = os.environ.get("SUDO_USER") or os.environ.get("USER", "")
             if user:
                 subprocess.run(["usermod", "-aG", "docker", user], capture_output=True)
@@ -424,8 +439,11 @@ def _step_install_docker():
 
 
 def _step_docker_logs():
-    p = _paths()
-    cmd = ["docker", "compose", "-f", str(p["compose_yml"]),
+    compose_yml = DOCKER_DIR / "docker-compose.yml"
+    env_file    = CONFIG_DIR / "osm.env"
+    cmd = ["docker", "compose",
+           "-f", str(compose_yml),
+           "--env-file", str(env_file),
            "logs", "--tail=200", "--no-log-prefix"]
     yield _log("$ " + " ".join(cmd))
     try:
@@ -435,161 +453,6 @@ def _step_docker_logs():
         yield _done(True)
     except Exception as e:
         yield _done(False, str(e))
-
-
-# ---------------------------------------------------------------------------
-# Config templates
-# ---------------------------------------------------------------------------
-
-def _ors_config_template() -> str:
-    return f"""ors:
-  engine:
-    source_file: /home/ors/files/osm_file.pbf
-    graphs_root_path: /home/ors/graphs
-    profiles:
-      car:
-        enabled: true
-        profile: driving-car
-        preparation:
-          min_network_size: 200
-          methods:
-            ch:
-              enabled: true
-              threads: 1
-              weightings: fastest
-
-  services:
-    geocoding:
-      enabled: true
-      providers:
-        nominatim:
-          provider: nominatim
-          priority: 1
-          url: http://nominatim-nrw:8080/
-          timeout: 2000
-          minBatchSize: 1
-
-  request_limits:
-    max_locations: 200
-    max_matrix_locations: 200
-    max_visited_nodes: 10000000
-"""
-
-
-def _vroom_config_template() -> str:
-    return """cliArgs:
-  geometry: false
-  planmode: false
-  threads: 4
-  explore: 5
-  limit: '1mb'
-  logdir: '/..'
-  logsize: '100M'
-  maxlocations: 1000
-  maxvehicles: 200
-  override: true
-  path: ''
-  port: 3000
-  router: 'ors'
-  timeout: 300000
-  baseurl: '/'
-
-routingServers:
-  ors:
-    driving-car:
-      host: 'ors'
-      port: '8082'
-      baseurl: '/ors/v2'
-"""
-
-
-def _compose_template() -> str:
-    d = Path(OSM_COMPOSE_DIR)
-    nom_import = NOMINATIM_DATA_DIR
-    return f"""services:
-  tileserver:
-    image: klokantech/tileserver-gl
-    container_name: tileserver
-    ports:
-      - "8083:80"
-    volumes:
-      - {d}/tileserver:/data:ro
-    command: ["--config", "/data/config.json", "--no-cors"]
-    restart: unless-stopped
-    networks: [tiles-net]
-
-  nominatim-nrw:
-    image: mediagis/nominatim:4.5
-    container_name: nominatim-nrw
-    ports:
-      - "7071:8080"
-    volumes:
-      - nominatim-data:/var/lib/postgresql/16/main
-      - {nom_import}:/nominatim
-    environment:
-      POSTGRES_PASSWORD: nominatim
-      NOMINATIM_PASSWORD: nominatim
-      POSTGRES_DB: nominatim
-      PBF_PATH: /nominatim/nrw.osm.pbf
-      NOMINATIM_IMPORT: "1"
-      NOMINATIM_THREADS: "4"
-    shm_size: "1gb"
-    restart: unless-stopped
-    networks: [tiles-net]
-
-  ors:
-    image: openrouteservice/openrouteservice:v8.0.0
-    container_name: ors-app
-    ports:
-      - "8082:8082"
-    volumes:
-      - {d}/ors/ors-docker:/home/ors
-      - {d}/ors/ors-docker/config/ors-config.yml:/home/ors/config/ors-config.yml:ro
-    environment:
-      ORS_CONFIG_LOCATION: /home/ors/config/ors-config.yml
-      XMS: 8g
-      XMX: 12g
-    depends_on:
-      - nominatim-nrw
-    restart: unless-stopped
-    networks: [tiles-net]
-
-  graphhopper:
-    image: israelhikingmap/graphhopper:latest
-    container_name: graphhopper
-    ports:
-      - "8989:8989"
-    volumes:
-      - {d}/graphhopper/data:/data
-    environment:
-      JAVA_OPTS: -Xms2g -Xmx8g
-    command: ["--input","/data/nordrhein-westfalen-latest.osm.pbf",
-              "--graph-cache","/data/default-gh",
-              "--host","0.0.0.0"]
-    restart: unless-stopped
-    networks: [tiles-net]
-
-  vroom:
-    image: vroomvrp/vroom-docker:v1.10.0
-    container_name: vroom
-    ports:
-      - "8084:3000"
-    volumes:
-      - {d}/vroom:/conf
-    environment:
-      VROOM_ROUTER: ors
-    depends_on:
-      - ors
-    restart: unless-stopped
-    networks: [tiles-net]
-
-networks:
-  tiles-net:
-    driver: bridge
-
-volumes:
-  nominatim-data:
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -623,17 +486,56 @@ def api_setup_state():
     return jsonify(_setup_state())
 
 
+@app.route("/api/setup/save-config", methods=["POST"])
+def api_setup_save_config():
+    global OSM_DATA_ROOT, MBTILES_URL, GEOFABRIK_PBF_URL
+
+    data = request.get_json(force=True, silent=True) or {}
+    new_root      = (data.get("osm_data_root") or "").strip()
+    new_mbtiles   = (data.get("mbtiles_url") or "").strip()
+    new_geofabrik = (data.get("geofabrik_url") or "").strip()
+
+    if not new_root:
+        return jsonify({"error": "Kein Pfad angegeben"}), 400
+
+    env_file = CONFIG_DIR / "osm.env"
+    content  = env_file.read_text()
+
+    def _set(text: str, key: str, value: str) -> str:
+        pattern = rf"^{re.escape(key)}=.*$"
+        replacement = f"{key}={value}"
+        if re.search(pattern, text, re.MULTILINE):
+            return re.sub(pattern, replacement, text, flags=re.MULTILINE)
+        return text + f"\n{replacement}\n"
+
+    content = _set(content, "OSM_DATA_ROOT", new_root)
+    if new_mbtiles:
+        content = _set(content, "MBTILES_URL", new_mbtiles)
+    if new_geofabrik:
+        content = _set(content, "GEOFABRIK_PBF_URL", new_geofabrik)
+
+    env_file.write_text(content)
+
+    OSM_DATA_ROOT     = new_root
+    if new_mbtiles:
+        MBTILES_URL   = new_mbtiles
+    if new_geofabrik:
+        GEOFABRIK_PBF_URL = new_geofabrik
+
+    return jsonify({"ok": True, "osm_data_root": new_root})
+
+
 _STEPS = {
-    "create-dirs":     _step_create_dirs,
-    "download-pbf":    _step_download_pbf,
-    "download-mbtiles":_step_download_mbtiles,
-    "gen-configs":     _step_generate_configs,
-    "install-docker":  _step_install_docker,
-    "docker-pull":     lambda: _run_compose(["pull"]),
-    "docker-start":    lambda: _run_compose(["up", "-d"]),
-    "docker-stop":     lambda: _run_compose(["down"]),
-    "docker-restart":  lambda: _run_compose(["restart"]),
-    "docker-logs":     _step_docker_logs,
+    "create-dirs":      _step_create_dirs,
+    "check-configs":    _step_check_configs,
+    "download-pbf":     _step_download_pbf,
+    "download-mbtiles": _step_download_mbtiles,
+    "install-docker":   _step_install_docker,
+    "docker-pull":      lambda: _run_compose(["pull"]),
+    "docker-start":     lambda: _run_compose(["up", "-d"]),
+    "docker-stop":      lambda: _run_compose(["down"]),
+    "docker-restart":   lambda: _run_compose(["restart"]),
+    "docker-logs":      _step_docker_logs,
 }
 
 
@@ -657,7 +559,7 @@ def api_setup_run(step: str):
 
 @app.route("/api/geocode", methods=["POST"])
 def api_geocode():
-    data = request.get_json(force=True, silent=True) or {}
+    data  = request.get_json(force=True, silent=True) or {}
     query = (data.get("query") or "").strip()
     if not query:
         return jsonify({"error": "Kein Suchbegriff angegeben"}), 400

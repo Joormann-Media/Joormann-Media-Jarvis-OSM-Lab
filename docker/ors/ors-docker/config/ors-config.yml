@@ -1,0 +1,31 @@
+ors:
+  engine:
+    source_file: /home/ors/files/osm_file.pbf
+    graphs_root_path: /home/ors/graphs
+    profiles:
+      car:
+        enabled: true
+        profile: driving-car
+        preparation:
+          min_network_size: 200
+          methods:
+            ch:
+              enabled: true
+              threads: 1
+              weightings: fastest
+
+  services:
+    geocoding:
+      enabled: true
+      providers:
+        nominatim:
+          provider: nominatim
+          priority: 1
+          url: http://nominatim-nrw:8080/
+          timeout: 2000
+          minBatchSize: 1
+
+  request_limits:
+    max_locations: 200
+    max_matrix_locations: 200
+    max_visited_nodes: 10000000
