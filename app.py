@@ -41,11 +41,11 @@ app = Flask(__name__)
 # ---------------------------------------------------------------------------
 
 SERVICES = [
-    {"key": "nominatim",   "name": "Nominatim (Geocoding)", "url": NOMINATIM_URL   + "/status",      "container": "nominatim-nrw"},
-    {"key": "ors",         "name": "OpenRouteService",       "url": ORS_URL         + "/ors/v2/health","container": "ors-app"},
-    {"key": "graphhopper", "name": "GraphHopper",            "url": GRAPHHOPPER_URL + "/health",       "container": "graphhopper"},
-    {"key": "tileserver",  "name": "TileServer GL",          "url": TILESERVER_URL  + "/health",       "container": "tileserver"},
-    {"key": "vroom",       "name": "VROOM",                  "url": VROOM_URL       + "/",             "container": "vroom"},
+    {"key": "nominatim",   "name": "Nominatim (Geocoding)", "url": NOMINATIM_URL   + "/status.php",    "container": "nominatim-nrw"},
+    {"key": "ors",         "name": "OpenRouteService",       "url": ORS_URL         + "/ors/v2/health", "container": "ors-app"},
+    {"key": "graphhopper", "name": "GraphHopper",            "url": GRAPHHOPPER_URL + "/health",        "container": "graphhopper"},
+    {"key": "tileserver",  "name": "TileServer GL",          "url": TILESERVER_URL  + "/health",        "container": "tileserver"},
+    {"key": "vroom",       "name": "VROOM",                  "url": VROOM_URL       + "/health",        "container": "vroom"},
 ]
 
 
@@ -74,13 +74,14 @@ def _nominatim_progress() -> dict:
         if r.status_code == 200:
             return {"phase": "ready", "detail": "Import abgeschlossen – bereit"}
         if r.status_code == 503:
-            return {"phase": "importing", "detail": r.text.strip()[:200] or "Import läuft…"}
+            body = r.text.strip()[:200]
+            return {"phase": "importing", "detail": body or "Import läuft…"}
         return {"phase": "unknown", "detail": f"HTTP {r.status_code}"}
     except requests.exceptions.ConnectionError:
         state = _docker_state("nominatim-nrw")
-        if state == "running":
-            return {"phase": "starting", "detail": "Container läuft, HTTP noch nicht erreichbar"}
-        return {"phase": state, "detail": f"Container: {state}"}
+        detail = "Container läuft, HTTP noch nicht erreichbar" if state == "running" else f"Container: {state}"
+        phase  = "starting" if state == "running" else state
+        return {"phase": phase, "detail": detail}
     except Exception as e:
         return {"phase": "error", "detail": str(e)}
 
