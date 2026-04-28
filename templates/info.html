@@ -8,6 +8,10 @@
     :root { --bg:#0b1220; --panel:#111827; --text:#e5e7eb; --muted:#9ca3af; --line:#334155; --btn:#2563eb; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Arial, sans-serif; background: linear-gradient(130deg,#020617,#0f172a); color: var(--text); }
+    .navbar { background: rgba(10, 18, 30, .92); border-bottom: 1px solid var(--line); padding: .75rem 1.5rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1000; }
+    .navbar-brand { font-size: 1.05rem; font-weight: 800; color: #7dd3fc; text-decoration: none; letter-spacing: .04em; text-transform: uppercase; }
+    .nav-link { color: var(--muted); text-decoration: none; font-size: .9rem; margin-left: 1rem; }
+    .nav-link:hover, .nav-link.active { color: var(--text); }
     .wrap { max-width: 1050px; margin: 0 auto; padding: 20px; }
     .card { background: rgba(17,24,39,.92); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
     h1,h2,h3 { margin: 0 0 10px; }
@@ -22,6 +26,17 @@
   </style>
 </head>
 <body>
+<nav class="navbar">
+  <a class="navbar-brand" href="/">Jarvis OSM Lab</a>
+  <div>
+    <a class="nav-link d-inline" href="/">Karte</a>
+    <a class="nav-link d-inline" href="/route">Routing</a>
+    <a class="nav-link d-inline" href="/status">Status</a>
+    <a class="nav-link d-inline" href="/setup">Setup</a>
+    <a class="nav-link d-inline active" href="/info">Info</a>
+    <a class="nav-link d-inline" href="/link">Link</a>
+  </div>
+</nav>
 <div class="wrap">
   <div class="card">
     <h1>Jarvis OSM-Lab API Info</h1>

@@ -13,7 +13,7 @@
     }
     body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; margin: 0; }
 
-    .navbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: .75rem 1.5rem; display: flex; align-items: center; justify-content: space-between; }
+    .navbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: .75rem 1.5rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1000; }
     .navbar-brand { font-size: 1.1rem; font-weight: 700; color: var(--accent); text-decoration: none; }
     .nav-link { color: var(--muted); text-decoration: none; font-size: .9rem; margin-left: 1.5rem; }
     .nav-link:hover, .nav-link.active { color: var(--text); }
@@ -179,9 +179,12 @@
 <nav class="navbar">
   <a class="navbar-brand" href="/">⬡ Jarvis OSM Lab</a>
   <div>
-    <a class="nav-link" href="/">Suche</a>
+    <a class="nav-link" href="/">Karte</a>
+    <a class="nav-link" href="/route">Routing</a>
     <a class="nav-link" href="/status">Status</a>
     <a class="nav-link active" href="/setup">Setup</a>
+    <a class="nav-link" href="/info">Info</a>
+    <a class="nav-link" href="/link">Link</a>
   </div>
 </nav>
 
