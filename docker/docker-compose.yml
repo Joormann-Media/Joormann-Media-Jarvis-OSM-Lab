@@ -7,7 +7,7 @@ services:
     volumes:
       - ./tileserver:/data:ro
       - ${OSM_DATA_ROOT}/mbtiles/germany.mbtiles:/data/germany.mbtiles:ro
-    command: ["--config", "/data/config.json", "--no-cors"]
+    command: ["--config", "/data/config.json"]
     restart: unless-stopped
     networks: [tiles-net]
 
@@ -24,7 +24,11 @@ services:
       NOMINATIM_PASSWORD: nominatim
       POSTGRES_DB: nominatim
       PBF_PATH: /nominatim/nrw.osm.pbf
-      NOMINATIM_IMPORT: "1"
+      # Erst-Import ist erfolgt — auf "0" lassen, sonst startet jeder
+      # Container-Recreate einen neuen 30–60-min-Import.
+      # Wenn die DB neu aufgebaut werden soll: nominatim-data/ leeren UND
+      # diese Variable wieder auf "1" setzen.
+      NOMINATIM_IMPORT: "0"
       NOMINATIM_THREADS: "4"
     shm_size: "1gb"
     restart: unless-stopped
@@ -67,7 +71,7 @@ services:
     ports:
       - "8084:3000"
     volumes:
-      - ./vroom:/conf:ro
+      - ./vroom:/conf
     environment:
       VROOM_ROUTER: ors
     depends_on:
@@ -75,6 +79,9 @@ services:
     restart: unless-stopped
     networks: [tiles-net]
 
+  # Overpass: wiktorn-Image kann nur .osm.bz2 (kein PBF). Die Datei
+  # nrw.osm.bz2 wird einmalig per scripts/convert-pbf-to-bz2.sh aus der
+  # NRW-PBF erzeugt (~30 min, läuft via osmosis in einem Docker-Container).
   overpass:
     image: wiktorn/overpass-api
     container_name: overpass-nrw
@@ -86,7 +93,7 @@ services:
     environment:
       OVERPASS_META: "yes"
       OVERPASS_MODE: init
-      OVERPASS_PLANET_URL: "file:///data/nrw.osm.pbf"
+      OVERPASS_PLANET_URL: "file:///data/nrw.osm.bz2"
       OVERPASS_RULES_LOAD: 10
       OVERPASS_SPACE: 4000000000
       OVERPASS_MAX_TIMEOUT: 1000

@@ -40,6 +40,8 @@ MBTILES_URL       = os.environ.get("MBTILES_URL", "")
 TIMEOUT = 3
 
 app = Flask(__name__)
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.jinja_env.auto_reload = True
 
 
 # ---------------------------------------------------------------------------
@@ -322,16 +324,21 @@ def _step_download_pbf():
         yield _done(False, f"Download fehlgeschlagen: {e}")
         return
 
-    # Symlinks für GraphHopper und ORS auf die eine PBF-Datei
+    # Hardlinks für GraphHopper und ORS auf die eine PBF-Datei.
+    # Hardlinks (statt Symlinks) damit die Datei in Docker-Containern korrekt
+    # erscheint — Symlinks würden im Container ins Leere zeigen, weil ihr
+    # Zielpfad außerhalb des Bind-Mounts liegt.
     for link in [p["gh_pbf"], p["ors_pbf"]]:
         link.parent.mkdir(parents=True, exist_ok=True)
+        if link.is_symlink() or (link.exists() and link.stat().st_ino != pbf.stat().st_ino):
+            link.unlink()
         if not link.exists():
             try:
-                link.symlink_to(pbf.resolve())
-                yield _log(f"✓ Symlink: {link}")
-            except Exception as e:
+                os.link(pbf, link)
+                yield _log(f"✓ Hardlink: {link}")
+            except OSError as e:
                 shutil.copy2(str(pbf), str(link))
-                yield _log(f"✓ Kopiert (kein Symlink möglich): {link} ({e})")
+                yield _log(f"✓ Kopiert (Hardlink fehlgeschlagen): {link} ({e})")
         else:
             yield _log(f"→ Bereits vorhanden: {link}")
 
@@ -466,6 +473,12 @@ def index():
                            nominatim_url=NOMINATIM_URL)
 
 
+@app.route("/route")
+def route_page():
+    return render_template("route.html",
+                           tileserver_url=TILESERVER_URL)
+
+
 @app.route("/status")
 def status_page():
     return render_template("status.html")
@@ -484,6 +497,97 @@ def api_status():
 @app.route("/api/setup/state")
 def api_setup_state():
     return jsonify(_setup_state())
+
+
+@app.route("/api/setup/browse-dirs")
+def api_setup_browse_dirs():
+    requested   = request.args.get("path", "").strip()
+    show_hidden = request.args.get("hidden", "0") == "1"
+
+    if not requested:
+        for candidate in (OSM_DATA_ROOT, "/mnt", "/media", str(Path.home()), "/"):
+            if candidate and Path(candidate).is_dir():
+                requested = candidate
+                break
+
+    try:
+        target = Path(requested).expanduser().resolve()
+    except Exception as e:
+        return jsonify({"error": f"Ungültiger Pfad: {e}"}), 400
+
+    if not target.exists():
+        return jsonify({"error": f"Pfad existiert nicht: {target}"}), 404
+    if not target.is_dir():
+        target = target.parent
+
+    entries = []
+    try:
+        for entry in sorted(target.iterdir(), key=lambda p: p.name.lower()):
+            try:
+                if not entry.is_dir():
+                    continue
+                hidden = entry.name.startswith(".")
+                if hidden and not show_hidden:
+                    continue
+                entries.append({
+                    "name":    entry.name,
+                    "path":    str(entry),
+                    "hidden":  hidden,
+                    "symlink": entry.is_symlink(),
+                })
+            except (PermissionError, OSError):
+                continue
+    except PermissionError:
+        return jsonify({"error": f"Keine Berechtigung: {target}"}), 403
+
+    disk = None
+    try:
+        u = shutil.disk_usage(target)
+        disk = {
+            "total_gb": round(u.total / 1024 ** 3, 1),
+            "free_gb":  round(u.free  / 1024 ** 3, 1),
+            "used_gb":  round(u.used  / 1024 ** 3, 1),
+            "pct_used": round(u.used / u.total * 100, 1) if u.total else 0,
+        }
+    except Exception:
+        pass
+
+    shortcuts = []
+    for label, path in (("Home", str(Path.home())), ("/mnt", "/mnt"),
+                        ("/media", "/media"), ("/", "/")):
+        if Path(path).is_dir():
+            shortcuts.append({"label": label, "path": path})
+
+    return jsonify({
+        "path":      str(target),
+        "parent":    str(target.parent) if target.parent != target else None,
+        "entries":   entries,
+        "disk":      disk,
+        "shortcuts": shortcuts,
+    })
+
+
+@app.route("/api/setup/create-dir", methods=["POST"])
+def api_setup_create_dir():
+    data   = request.get_json(force=True, silent=True) or {}
+    parent = (data.get("parent") or "").strip()
+    name   = (data.get("name")   or "").strip()
+
+    if not parent or not name:
+        return jsonify({"error": "parent und name erforderlich"}), 400
+    if "/" in name or "\\" in name or name in (".", ".."):
+        return jsonify({"error": "Ungültiger Ordnername"}), 400
+
+    try:
+        target = (Path(parent).expanduser() / name).resolve()
+        target.mkdir(parents=False, exist_ok=False)
+        return jsonify({"ok": True, "path": str(target)})
+    except FileExistsError:
+        return jsonify({"error": "Ordner existiert bereits"}), 409
+    except PermissionError:
+        return jsonify({"error": "Keine Berechtigung"}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/setup/save-config", methods=["POST"])
@@ -575,6 +679,145 @@ def api_geocode():
         return jsonify({"error": "Nominatim nicht erreichbar"}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/route", methods=["POST"])
+def api_route():
+    """Multi-Point-Routing über GraphHopper. Erwartet:
+       { "profile": "car|foot|bike", "points": [[lat,lon], ...] (mind. 2) }
+    Antwort: { distance_m, time_ms, geometry, instructions }"""
+    data    = request.get_json(force=True, silent=True) or {}
+    profile = (data.get("profile") or "car").lower()
+    points  = data.get("points") or []
+
+    if profile not in ("car", "foot", "bike"):
+        return jsonify({"error": "Profil muss car, foot oder bike sein"}), 400
+    if not isinstance(points, list) or len(points) < 2:
+        return jsonify({"error": "Mindestens zwei Wegpunkte nötig"}), 400
+
+    params = [("profile", profile),
+              ("points_encoded", "false"),
+              ("instructions", "true"),
+              ("locale", "de"),
+              ("calc_points", "true")]
+    for p in points:
+        try:
+            lat, lon = float(p[0]), float(p[1])
+        except (TypeError, ValueError, IndexError):
+            return jsonify({"error": f"Ungültiger Wegpunkt: {p}"}), 400
+        params.append(("point", f"{lat},{lon}"))
+
+    try:
+        r = requests.get(GRAPHHOPPER_URL + "/route", params=params, timeout=15)
+        if r.status_code >= 400:
+            return jsonify({"error": f"GraphHopper {r.status_code}: {r.text[:200]}"}), 502
+        gh = r.json()
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "GraphHopper nicht erreichbar"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    paths = gh.get("paths") or []
+    if not paths:
+        return jsonify({"error": "Keine Route gefunden"}), 404
+    p0 = paths[0]
+    return jsonify({
+        "distance_m":   p0.get("distance"),
+        "time_ms":      p0.get("time"),
+        "geometry":     p0.get("points"),       # GeoJSON LineString
+        "instructions": p0.get("instructions", []),
+        "bbox":         p0.get("bbox"),
+        "ascend":       p0.get("ascend"),
+        "descend":      p0.get("descend"),
+    })
+
+
+_POI_CATEGORIES = {
+    "pharmacy":     ("amenity", "pharmacy",     "Apotheke"),
+    "bar":          ("amenity", "bar",          "Bar"),
+    "pub":          ("amenity", "pub",          "Kneipe"),
+    "restaurant":   ("amenity", "restaurant",   "Restaurant"),
+    "cafe":         ("amenity", "cafe",         "Café"),
+    "fuel":         ("amenity", "fuel",         "Tankstelle"),
+    "bank":         ("amenity", "bank",         "Bank"),
+    "atm":          ("amenity", "atm",          "Geldautomat"),
+    "hospital":     ("amenity", "hospital",     "Krankenhaus"),
+    "doctors":      ("amenity", "doctors",      "Arzt"),
+    "school":       ("amenity", "school",       "Schule"),
+    "supermarket":  ("shop",    "supermarket",  "Supermarkt"),
+    "bakery":       ("shop",    "bakery",       "Bäckerei"),
+    "convenience":  ("shop",    "convenience",  "Kiosk"),
+}
+
+
+@app.route("/api/poi", methods=["POST"])
+def api_poi():
+    """POI-Suche per Overpass innerhalb einer Bbox.
+       Erwartet: { "category": "<key>", "bbox": [south, west, north, east] }"""
+    data     = request.get_json(force=True, silent=True) or {}
+    category = (data.get("category") or "").strip()
+    bbox     = data.get("bbox") or []
+
+    if category not in _POI_CATEGORIES:
+        return jsonify({"error": "Unbekannte Kategorie"}), 400
+    if not isinstance(bbox, list) or len(bbox) != 4:
+        return jsonify({"error": "bbox = [south, west, north, east] erwartet"}), 400
+    try:
+        s, w, n, e = (float(x) for x in bbox)
+    except (TypeError, ValueError):
+        return jsonify({"error": "bbox-Werte müssen Zahlen sein"}), 400
+
+    # Bbox-Größe begrenzen, damit Overpass nicht überlastet
+    if (n - s) * (e - w) > 4.0:
+        return jsonify({"error": "Bbox zu groß — bitte mehr reinzoomen"}), 400
+
+    key, value, label = _POI_CATEGORIES[category]
+    query = (
+        f"[out:json][timeout:25];"
+        f"("
+        f"  node[\"{key}\"=\"{value}\"]({s},{w},{n},{e});"
+        f"  way[\"{key}\"=\"{value}\"]({s},{w},{n},{e});"
+        f");"
+        f"out center tags;"
+    )
+
+    try:
+        r = requests.post(OVERPASS_URL + "/api/interpreter",
+                          data={"data": query}, timeout=30,
+                          headers={"User-Agent": "Joormann-OSM-Lab/1.0"})
+        if r.status_code >= 400:
+            return jsonify({"error": f"Overpass {r.status_code}"}), 502
+        op = r.json()
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "Overpass nicht erreichbar (importiert evtl. noch)"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    pois = []
+    for el in op.get("elements", []):
+        # node hat lat/lon direkt, way hat center.lat/lon
+        if el.get("type") == "node":
+            lat, lon = el.get("lat"), el.get("lon")
+        else:
+            c = el.get("center") or {}
+            lat, lon = c.get("lat"), c.get("lon")
+        if lat is None or lon is None:
+            continue
+        tags = el.get("tags") or {}
+        pois.append({
+            "id":       el.get("id"),
+            "type":     el.get("type"),
+            "lat":      lat,
+            "lon":      lon,
+            "name":     tags.get("name") or label,
+            "tags":     tags,
+        })
+    return jsonify({"category": category, "label": label, "results": pois})
+
+
+@app.route("/api/poi/categories")
+def api_poi_categories():
+    return jsonify([{"key": k, "label": v[2]} for k, v in _POI_CATEGORIES.items()])
 
 
 @app.route("/api/reverse", methods=["POST"])

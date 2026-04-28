@@ -100,6 +100,78 @@
     .dir-chip  { background: #0a1626; border: 1px solid var(--border); border-radius: 6px;
                  padding: .3rem .65rem; font-size: .75rem; font-family: monospace; display: flex; gap: .4rem; align-items: center; }
     .dir-chip .dot { width: 7px; height: 7px; flex-shrink: 0; }
+
+    /* ── Folder browser modal ─────────────────────────────────────── */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.65);
+                     display: none; align-items: center; justify-content: center; z-index: 1000; }
+    .modal-overlay.visible { display: flex; }
+    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+             width: min(820px, 95vw); max-height: 86vh; display: flex; flex-direction: column;
+             box-shadow: 0 30px 80px rgba(0,0,0,.5); overflow: hidden; }
+    .modal-head { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+                  display: flex; align-items: center; gap: 1rem; }
+    .modal-title { font-size: 1rem; font-weight: 700; flex: 1; }
+    .modal-close { background: transparent; border: none; color: var(--muted);
+                   font-size: 1.4rem; cursor: pointer; padding: 0 .25rem; line-height: 1; }
+    .modal-close:hover { color: var(--text); }
+
+    .browser-toolbar { padding: .75rem 1.25rem; border-bottom: 1px solid var(--border);
+                       display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+    .browser-toolbar input.path-input { flex: 1; min-width: 240px; }
+    .browser-toolbar .btn-icon { background: #1e293b; border: 1px solid var(--border);
+                                 color: var(--muted); border-radius: 6px;
+                                 padding: .35rem .6rem; font-size: .85rem; cursor: pointer; }
+    .browser-toolbar .btn-icon:hover { color: var(--text); border-color: #475569; }
+
+    .breadcrumb { padding: .5rem 1.25rem; background: #0a1120; border-bottom: 1px solid var(--border);
+                  font-family: monospace; font-size: .8rem; color: var(--muted);
+                  overflow-x: auto; white-space: nowrap; }
+    .breadcrumb a { color: var(--accent); cursor: pointer; text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
+    .breadcrumb .sep { margin: 0 .35rem; color: #475569; }
+
+    .shortcuts-bar { padding: .55rem 1.25rem; border-bottom: 1px solid var(--border);
+                     display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+    .shortcut-chip { background: #1a2540; border: 1px solid #2a4070; color: #93c5fd;
+                     border-radius: 6px; padding: .25rem .65rem; font-size: .76rem;
+                     cursor: pointer; font-family: monospace; }
+    .shortcut-chip:hover { background: #243358; }
+
+    .browser-list { flex: 1; overflow-y: auto; padding: .5rem 0; }
+    .browser-item { display: flex; align-items: center; gap: .75rem;
+                    padding: .45rem 1.25rem; cursor: pointer; font-size: .87rem;
+                    border-left: 3px solid transparent; }
+    .browser-item:hover { background: #0a1626; border-left-color: var(--accent); }
+    .browser-item.selected { background: #1a2540; border-left-color: var(--accent); }
+    .browser-item .icon { width: 18px; text-align: center; flex-shrink: 0; }
+    .browser-item .name { flex: 1; font-family: monospace; }
+    .browser-item .badge { font-size: .7rem; color: var(--muted);
+                           background: #0a1120; border-radius: 4px;
+                           padding: .05rem .4rem; border: 1px solid var(--border); }
+    .browser-item.dim { color: var(--muted); }
+    .browser-empty { padding: 2rem 1.25rem; text-align: center; color: var(--muted); font-size: .85rem; }
+
+    .modal-foot { border-top: 1px solid var(--border); padding: .8rem 1.25rem;
+                  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+    .modal-foot .selected-path { flex: 1; min-width: 200px;
+                                 font-family: monospace; font-size: .8rem;
+                                 color: var(--muted); overflow: hidden; text-overflow: ellipsis;
+                                 white-space: nowrap; }
+    .modal-foot .disk-info { font-size: .72rem; color: #64748b;
+                             font-family: monospace; flex-shrink: 0; }
+    .modal-foot .disk-info .free { color: var(--ok); }
+
+    .hidden-toggle { font-size: .76rem; color: var(--muted); display: flex; gap: .35rem;
+                     align-items: center; cursor: pointer; user-select: none; }
+
+    .btn-browse { background: #1a2540; color: #93c5fd; border: 1px solid #2a4070;
+                  border-radius: 6px; padding: .38rem .75rem; font-size: .85rem;
+                  font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .btn-browse:hover { background: #243358; }
+
+    .browser-error { padding: .75rem 1.25rem; background: #3b1a1a; color: #fca5a5;
+                     font-size: .82rem; border-bottom: 1px solid #7f1d1d; display: none; }
+    .browser-error.visible { display: block; }
   </style>
 </head>
 <body>
@@ -149,6 +221,7 @@
       </div>
       <div class="path-row">
         <input type="text" id="input-data-root" class="path-input" placeholder="/mnt/data_toshiba">
+        <button class="btn-browse" onclick="openBrowser()" title="Ordner durchsuchen">📁 Durchsuchen…</button>
         <button class="btn-run" onclick="saveConfig()">Speichern</button>
         <span id="save-status" class="save-status"></span>
       </div>
@@ -349,6 +422,42 @@
   </div>
 
 </div><!-- /page -->
+
+<!-- ── Folder Browser Modal ─────────────────────────────────────────── -->
+<div class="modal-overlay" id="browserModal" onclick="if(event.target===this) closeBrowser()">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title">📁 Ordner auswählen</div>
+      <button class="modal-close" onclick="closeBrowser()" title="Schließen">×</button>
+    </div>
+
+    <div class="browser-toolbar">
+      <button class="btn-icon" onclick="browserGoUp()" title="Eine Ebene nach oben">⬆</button>
+      <input type="text" id="browser-path" class="path-input"
+             onkeydown="if(event.key==='Enter') browserGoTo(this.value)"
+             placeholder="/path/to/folder">
+      <button class="btn-icon" onclick="browserGoTo(document.getElementById('browser-path').value)">Gehe zu</button>
+      <button class="btn-icon" onclick="createNewFolder()" title="Neuen Ordner anlegen">＋ Neuer Ordner</button>
+      <label class="hidden-toggle">
+        <input type="checkbox" id="browser-hidden" onchange="browserReload()"> Versteckte zeigen
+      </label>
+    </div>
+
+    <div class="shortcuts-bar" id="browser-shortcuts"></div>
+    <div class="breadcrumb" id="browser-breadcrumb"></div>
+    <div class="browser-error" id="browser-error"></div>
+    <div class="browser-list" id="browser-list">
+      <div class="browser-empty">Lade…</div>
+    </div>
+
+    <div class="modal-foot">
+      <div class="selected-path" id="browser-selected-path">–</div>
+      <div class="disk-info" id="browser-disk"></div>
+      <button class="btn-refresh" onclick="closeBrowser()">Abbrechen</button>
+      <button class="btn-ok" onclick="browserConfirm()">Diesen Ordner wählen</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // ── Config speichern ──────────────────────────────────────────────────────────
@@ -575,6 +684,148 @@ function runStep(step, logId) {
 function esc(str) {
   return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
+
+// ── Folder Browser ───────────────────────────────────────────────────────────
+let _browserCurrent = null;
+
+function openBrowser() {
+  const start = document.getElementById("input-data-root").value.trim();
+  document.getElementById("browserModal").classList.add("visible");
+  browserGoTo(start || "");
+}
+
+function closeBrowser() {
+  document.getElementById("browserModal").classList.remove("visible");
+}
+
+async function browserGoTo(path) {
+  const errEl = document.getElementById("browser-error");
+  errEl.classList.remove("visible");
+  errEl.textContent = "";
+
+  const hidden = document.getElementById("browser-hidden").checked ? "1" : "0";
+  const url = "/api/setup/browse-dirs?hidden=" + hidden +
+              (path ? "&path=" + encodeURIComponent(path) : "");
+
+  try {
+    const res = await fetch(url);
+    const d = await res.json();
+    if (!res.ok) {
+      errEl.textContent = d.error || ("HTTP " + res.status);
+      errEl.classList.add("visible");
+      return;
+    }
+    renderBrowser(d);
+  } catch (e) {
+    errEl.textContent = "Fehler: " + e;
+    errEl.classList.add("visible");
+  }
+}
+
+function browserReload() {
+  if (_browserCurrent) browserGoTo(_browserCurrent.path);
+}
+
+function browserGoUp() {
+  if (_browserCurrent?.parent) browserGoTo(_browserCurrent.parent);
+}
+
+function renderBrowser(d) {
+  _browserCurrent = d;
+
+  // Path input
+  document.getElementById("browser-path").value = d.path;
+  document.getElementById("browser-selected-path").textContent = d.path;
+
+  // Breadcrumb
+  const crumb = document.getElementById("browser-breadcrumb");
+  const parts = d.path.split("/").filter(Boolean);
+  let acc = "";
+  let html = `<a onclick="browserGoTo('/')">/</a>`;
+  parts.forEach((p, i) => {
+    acc += "/" + p;
+    html += `<span class="sep">›</span><a onclick="browserGoTo('${acc.replace(/'/g,"\\'")}')">${esc(p)}</a>`;
+  });
+  crumb.innerHTML = html;
+
+  // Shortcuts
+  const sc = document.getElementById("browser-shortcuts");
+  sc.innerHTML = (d.shortcuts || []).map(s =>
+    `<button class="shortcut-chip" onclick="browserGoTo('${s.path.replace(/'/g,"\\'")}')">${esc(s.label)}</button>`
+  ).join("");
+
+  // Entries
+  const list = document.getElementById("browser-list");
+  if (!d.entries || d.entries.length === 0) {
+    list.innerHTML = `<div class="browser-empty">Keine Unterordner${d.entries ? " (oder alle versteckt)" : ""}.</div>`;
+  } else {
+    let items = "";
+    if (d.parent) {
+      items += `<div class="browser-item dim" ondblclick="browserGoTo('${d.parent.replace(/'/g,"\\'")}')"
+                     onclick="browserGoTo('${d.parent.replace(/'/g,"\\'")}')">
+                  <div class="icon">⬆</div><div class="name">..</div>
+                </div>`;
+    }
+    items += d.entries.map(e => {
+      const badges = [];
+      if (e.symlink) badges.push(`<span class="badge">↗ symlink</span>`);
+      if (e.hidden)  badges.push(`<span class="badge">hidden</span>`);
+      const safePath = e.path.replace(/'/g,"\\'");
+      return `<div class="browser-item${e.hidden ? ' dim' : ''}"
+                   ondblclick="browserGoTo('${safePath}')"
+                   onclick="browserGoTo('${safePath}')">
+                <div class="icon">📁</div>
+                <div class="name">${esc(e.name)}</div>
+                ${badges.join(" ")}
+              </div>`;
+    }).join("");
+    list.innerHTML = items;
+  }
+
+  // Disk
+  const disk = document.getElementById("browser-disk");
+  if (d.disk) {
+    disk.innerHTML = `<span class="free">${d.disk.free_gb} GB frei</span> / ${d.disk.total_gb} GB`;
+  } else {
+    disk.textContent = "";
+  }
+}
+
+function browserConfirm() {
+  if (!_browserCurrent) return;
+  document.getElementById("input-data-root").value = _browserCurrent.path;
+  closeBrowser();
+}
+
+async function createNewFolder() {
+  if (!_browserCurrent) return;
+  const name = prompt("Name des neuen Ordners:");
+  if (!name) return;
+  const errEl = document.getElementById("browser-error");
+  try {
+    const res = await fetch("/api/setup/create-dir", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({parent: _browserCurrent.path, name: name.trim()})
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) {
+      errEl.textContent = d.error || "Fehler beim Anlegen";
+      errEl.classList.add("visible");
+      return;
+    }
+    browserReload();
+  } catch (e) {
+    errEl.textContent = "Fehler: " + e;
+    errEl.classList.add("visible");
+  }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.getElementById("browserModal").classList.contains("visible")) {
+    closeBrowser();
+  }
+});
 
 loadState();
 setInterval(loadState, 30000);

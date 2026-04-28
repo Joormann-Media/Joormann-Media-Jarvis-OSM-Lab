@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Falls die aufrufende Shell die docker-Gruppe nicht geladen hat (Login-Session
+# vor `usermod -aG docker` gestartet), per `sg docker` re-exec'en, damit der
+# Flask-Prozess Zugriff auf den Docker-Socket bekommt — sonst zeigt die
+# Status-Seite alle Container als "not found".
+if [[ -z "${OSM_LAB_SG_DOCKER:-}" ]] && getent group docker >/dev/null 2>&1; then
+  if id -nG | tr ' ' '\n' | grep -qx docker; then
+    : # Shell hat docker-Gruppe — alles gut
+  elif id -nG djanebmb 2>/dev/null | tr ' ' '\n' | grep -qx docker \
+       || getent group docker | cut -d: -f4 | tr ',' '\n' | grep -qx "$USER"; then
+    export OSM_LAB_SG_DOCKER=1
+    exec sg docker -c "$(printf '%q ' "${BASH_SOURCE[0]}" "$@")"
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 

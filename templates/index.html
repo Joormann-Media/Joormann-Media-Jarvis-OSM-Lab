@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Jarvis OSM Lab</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <style>
     :root { --bg: #0f172a; --surface: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #64748b; --accent: #38bdf8; }
     * { box-sizing: border-box; }
@@ -118,21 +118,25 @@
 </div>
 
 <script>
-const TILE_URL = "{{ tileserver_url }}/styles/osm-bright/{z}/{x}/{y}.png";
+const STYLE_URL = "{{ tileserver_url }}/styles/osm-bright/style.json";
 
-const map = L.map("map").setView([51.5, 7.5], 10);
+const map = new maplibregl.Map({
+  container: "map",
+  style: STYLE_URL,
+  center: [7.5, 51.5],   // [lon, lat]
+  zoom: 9,
+  attributionControl: { compact: true },
+});
 
-L.tileLayer(TILE_URL, {
-  attribution: '&copy; OpenStreetMap contributors',
-  maxZoom: 19,
-}).addTo(map);
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 
 let marker = null;
+let popup  = null;
 
 // ── Karten-Klick → Reverse ──────────────────────────────────────────────────
 map.on("click", (e) => {
-  document.getElementById("latInput").value = e.latlng.lat.toFixed(6);
-  document.getElementById("lonInput").value = e.latlng.lng.toFixed(6);
+  document.getElementById("latInput").value = e.lngLat.lat.toFixed(6);
+  document.getElementById("lonInput").value = e.lngLat.lng.toFixed(6);
   doReverse();
 });
 
@@ -201,11 +205,19 @@ function renderResults(results) {
 }
 
 function zoomTo(lat, lon, r) {
-  map.setView([lat, lon], 16);
+  map.flyTo({ center: [lon, lat], zoom: 16 });
+  setMarker(lat, lon,
+    `<strong>${esc(r.display_name?.split(",")[0] || "")}</strong><br>${esc(r.display_name || "")}`);
+}
+
+function setMarker(lat, lon, html) {
   if (marker) marker.remove();
-  marker = L.marker([lat, lon]).addTo(map)
-    .bindPopup(`<strong>${esc(r.display_name?.split(",")[0] || "")}</strong><br>${esc(r.display_name || "")}`)
-    .openPopup();
+  if (popup)  popup.remove();
+  popup = new maplibregl.Popup({ offset: 25, closeButton: true })
+            .setLngLat([lon, lat]).setHTML(html);
+  marker = new maplibregl.Marker({ color: "#38bdf8" })
+            .setLngLat([lon, lat]).setPopup(popup).addTo(map);
+  popup.addTo(map);
 }
 
 // ── Reverse ──────────────────────────────────────────────────────────────────
@@ -233,11 +245,9 @@ async function doReverse() {
     document.getElementById("revCoords").textContent = `${parseFloat(data.lat).toFixed(6)}, ${parseFloat(data.lon).toFixed(6)}`;
     document.getElementById("revResult").classList.add("show");
 
-    map.setView([lat, lon], 17);
-    if (marker) marker.remove();
-    marker = L.marker([lat, lon]).addTo(map)
-      .bindPopup(`<strong>${esc(data.display_name?.split(",")[0] || "")}</strong><br>${esc(data.display_name || "")}`)
-      .openPopup();
+    map.flyTo({ center: [lon, lat], zoom: 17 });
+    setMarker(lat, lon,
+      `<strong>${esc(data.display_name?.split(",")[0] || "")}</strong><br>${esc(data.display_name || "")}`);
   } catch(e) {
     showErr("revErr", "Netzwerkfehler");
   } finally {
