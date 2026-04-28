@@ -363,16 +363,88 @@ def _do_portal_sync(cfg: Optional[dict] = None) -> dict:
         return {"ok": False, "error": "not_registered", "message": "Portal-Credentials fehlen. POST /api/portal/register zuerst."}
 
     manifest = _service_manifest()
+    local_ip = _get_local_ip()
+    capabilities = manifest.get("capabilities", [])
+    endpoint_map = manifest.get("endpoints", {})
+    api_sections = [
+        {
+            "section": "Geocoding",
+            "endpoints": [
+                {"method": "POST", "path": "/api/geocode", "url": endpoint_map.get("geocode", ""), "description": "Adresse/Ort suchen"},
+                {"method": "POST", "path": "/api/reverse", "url": endpoint_map.get("reverse", ""), "description": "Koordinaten zu Adresse"},
+            ],
+        },
+        {
+            "section": "Routing",
+            "endpoints": [
+                {"method": "POST", "path": "/api/route", "url": endpoint_map.get("route", ""), "description": "Routenplanung (car/foot/bike)"},
+            ],
+        },
+        {
+            "section": "POI",
+            "endpoints": [
+                {"method": "POST", "path": "/api/poi", "url": endpoint_map.get("poi", ""), "description": "POI in BBox suchen"},
+                {"method": "GET", "path": "/api/poi/categories", "url": endpoint_map.get("poi_categories", ""), "description": "POI-Kategorien"},
+            ],
+        },
+        {
+            "section": "Node",
+            "endpoints": [
+                {"method": "GET", "path": "/health", "url": endpoint_map.get("health", ""), "description": "Healthcheck"},
+                {"method": "GET", "path": "/api/status", "url": endpoint_map.get("status", ""), "description": "Service-Status"},
+                {"method": "GET", "path": "/api/service-manifest", "url": endpoint_map.get("manifest", ""), "description": "Manifest"},
+                {"method": "GET", "path": "/info", "url": endpoint_map.get("info", ""), "description": "API-Dokumentation"},
+            ],
+        },
+    ]
+    capabilities_map = {
+        "display_output": True,
+        "overlay_output": True,
+    }
     payload = {
         "nodeUuid": node_uuid,
         "clientId": client_id,
-        "service": manifest.get("service", {}),
-        "capabilities": manifest.get("capabilities", []),
-        "routing": manifest.get("routing", {}),
-        "endpoints": manifest.get("endpoints", {}),
+        "capabilities": capabilities_map,
+        "capability_catalog": [{"key": key, "requires_connector": False} for key in capabilities_map.keys()],
+        "api_endpoints": api_sections,
+        "services": [
+            {
+                "name": "Jarvis OSM API",
+                "syncId": "jarvis-osm-api",
+                "serviceType": "other",
+                "protocol": "http",
+                "host": local_ip,
+                "port": FLASK_PORT,
+                "basePath": "/api",
+                "baseUrl": f"http://{local_ip}:{FLASK_PORT}",
+                "healthcheckPath": "/health",
+                "version": str(manifest.get("service", {}).get("version") or "2026.04"),
+                "serviceDescription": "OSM Lab: Geocoding, Reverse, Routing und POI-Suche (Overpass/Nominatim/GraphHopper).",
+                "api_endpoints": api_sections,
+                "isEnabled": True,
+                "isOnline": True,
+                "metadata": {
+                    "routing": manifest.get("routing", {}),
+                    "capabilities_osm": capabilities,
+                },
+            }
+        ],
+        "network": {
+            "localIp": local_ip,
+            "apiBaseUrl": f"http://{local_ip}:{FLASK_PORT}",
+            "localUrl": f"http://{local_ip}:{FLASK_PORT}",
+            "healthEndpoint": endpoint_map.get("health", f"http://{local_ip}:{FLASK_PORT}/health"),
+            "locationName": socket.gethostname(),
+        },
     }
 
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {
+        "X-Client-Id": client_id,
+        "X-Jarvis-Api-Key": api_key,
+        "X-API-Key": api_key,
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
     try:
         resp = requests.post(
             f"{portal_url.rstrip('/')}/api/jarvis/node/sync",
