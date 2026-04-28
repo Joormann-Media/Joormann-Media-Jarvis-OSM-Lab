@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSM-Lab API Info</title>
+  <style>
+    :root { --bg:#0b1220; --panel:#111827; --text:#e5e7eb; --muted:#9ca3af; --line:#334155; --btn:#2563eb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; background: linear-gradient(130deg,#020617,#0f172a); color: var(--text); }
+    .wrap { max-width: 1050px; margin: 0 auto; padding: 20px; }
+    .card { background: rgba(17,24,39,.92); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+    h1,h2,h3 { margin: 0 0 10px; }
+    p { margin: 0 0 10px; color: var(--muted); }
+    .btn { display:inline-block; text-decoration:none; background:var(--btn); color:#fff; font-weight:700; padding:9px 12px; border-radius:9px; }
+    table { width:100%; border-collapse: collapse; }
+    th,td { text-align:left; border-bottom:1px solid var(--line); padding:8px; font-size:14px; vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    code { background:#0b1020; border-radius:6px; padding:2px 6px; }
+    pre { background:#0b1020; border:1px solid var(--line); border-radius:10px; padding:10px; white-space:pre-wrap; word-break:break-word; }
+    .kpis { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Jarvis OSM-Lab API Info</h1>
+    <p>Endpoint-Übersicht und Beispiel-Requests für Geocode, Routing und POI.</p>
+    <a class="btn" href="/">Zurück zum Dashboard</a>
+    <a class="btn" href="/link" style="margin-left:8px;">Node-Link</a>
+  </div>
+
+  <div class="card">
+    <h2>Node Snapshot</h2>
+    <div class="kpis">
+      <div><strong>Name:</strong><br><code>{{ manifest.service.name }}</code></div>
+      <div><strong>Slug:</strong><br><code>{{ manifest.service.slug }}</code></div>
+      <div><strong>Version:</strong><br><code>{{ manifest.service.version }}</code></div>
+      <div><strong>Capabilities:</strong><br><code>{{ manifest.capabilities|length }}</code></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Capabilities</h2>
+    <pre>{{ manifest.capabilities|tojson(indent=2) }}</pre>
+  </div>
+
+  <div class="card">
+    <h2>Routing Metadata</h2>
+    <pre>{{ manifest.routing|tojson(indent=2) }}</pre>
+  </div>
+
+  <div class="card">
+    <h2>API Endpoints</h2>
+    <table>
+      <thead><tr><th>Methode</th><th>Pfad</th><th>Beschreibung</th></tr></thead>
+      <tbody>
+      {% for row in endpoints %}
+        <tr>
+          <td><code>{{ row.method }}</code></td>
+          <td><code>{{ row.path }}</code></td>
+          <td>{{ row.desc or '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Beispiel-Requests</h2>
+    {% for ex in examples %}
+      <h3>{{ ex.title }}</h3>
+      <p><code>{{ ex.method }} {{ ex.path }}</code></p>
+      <pre>{{ ex.json|tojson(indent=2) }}</pre>
+    {% endfor %}
+  </div>
+</div>
+</body>
+</html>

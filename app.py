@@ -187,7 +187,9 @@ def _service_manifest() -> dict:
         },
         "endpoints": {
             "ui": base + "/",
+            "info": base + "/info",
             "health": base + "/health",
+            "api_catalog": base + "/api",
             "status": base + "/api/status",
             "manifest": base + "/api/service-manifest",
             "capabilities": base + "/api/capabilities",
@@ -203,11 +205,19 @@ def _service_manifest() -> dict:
             "geo.geocode",
             "geo.reverse_geocode",
             "geo.address_search",
+            "geo.address_autocomplete",
             "map.route_plan",
             "map.route_plan.multistop",
+            "map.route_plan.profile_car",
+            "map.route_plan.profile_foot",
+            "map.route_plan.profile_bike",
             "map.poi_search",
+            "map.poi_categories",
             "map.tiles.vector",
             "jarvis.routing.osm_lab",
+            "jarvis.routing.address_lookup",
+            "jarvis.routing.route_planning",
+            "jarvis.routing.poi_lookup",
         ],
         "routing": {
             "profiles": ["car", "foot", "bike"],
@@ -217,6 +227,12 @@ def _service_manifest() -> dict:
                 "route_planning",
                 "poi_lookup",
             ],
+            "entrypoints": {
+                "address_lookup": "/api/geocode",
+                "route_planning": "/api/route",
+                "poi_lookup": "/api/poi",
+                "reverse_lookup": "/api/reverse",
+            },
         },
         "integration": {
             "family_panel_ready": True,
@@ -227,9 +243,52 @@ def _service_manifest() -> dict:
                 "POST /api/reverse mit {lat, lon, zoom?}",
                 "POST /api/route mit {profile, points:[[lat,lon], ...]}",
                 "POST /api/poi mit {category, bbox:[south,west,north,east]}",
+                "GET /api liefert Endpoint-Katalog inkl. Kurzbeschreibung",
             ],
         },
     }
+
+
+def _api_catalog_description(method: str, path: str) -> str:
+    key = (method.upper().strip(), path.strip())
+    descriptions: Dict[tuple[str, str], str] = {
+        ("GET", "/api"): "Endpoint-Katalog des OSM-Labs.",
+        ("GET", "/api/status"): "Live-Status aller OSM-Services.",
+        ("GET", "/api/service-manifest"): "Node-Selbstbeschreibung inkl. Routing-Infos.",
+        ("GET", "/api/capabilities"): "Kurzfassung von Capabilities + Endpoints.",
+        ("GET", "/api/setup/state"): "Setup-Zustand (Docker, Datenpfade, Dateien).",
+        ("GET", "/api/setup/browse-dirs"): "Verzeichnis-Browser fuer Setup.",
+        ("POST", "/api/setup/create-dir"): "Neues Verzeichnis im Setup anlegen.",
+        ("POST", "/api/setup/save-config"): "OSM-Pfade/URLs in config/osm.env speichern.",
+        ("POST", "/api/geocode"): "Addresssuche ueber Nominatim (+ POI-Fallback).",
+        ("POST", "/api/reverse"): "Reverse-Geocoding fuer lat/lon.",
+        ("POST", "/api/route"): "Routing ueber GraphHopper (car/foot/bike).",
+        ("POST", "/api/poi"): "POI-Suche ueber Overpass in einer BBox.",
+        ("GET", "/api/poi/categories"): "Verfuegbare POI-Kategorien.",
+        ("GET", "/api/portal/status"): "Status der Jarvis-Node-Registrierung.",
+        ("POST", "/api/portal/register"): "OSM-Lab am Family-Panel registrieren.",
+        ("POST", "/api/portal/sync"): "Capabilities/Endpoints ans Portal synchronisieren.",
+    }
+    return descriptions.get(key, "")
+
+
+def _api_catalog_endpoints() -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for rule in app.url_map.iter_rules():
+        path = str(rule.rule or "").strip()
+        if not path.startswith("/api"):
+            continue
+        methods = [m for m in sorted(rule.methods) if m not in {"HEAD"}]
+        for method in methods:
+            if method == "OPTIONS":
+                continue
+            rows.append({
+                "method": method,
+                "path": path,
+                "desc": _api_catalog_description(method, path),
+            })
+    rows.sort(key=lambda row: (row["path"], row["method"]))
+    return rows
 
 def _load_portal_config() -> dict:
     if not PORTAL_CONFIG_PATH.exists():
@@ -708,6 +767,48 @@ def index():
                            tileserver_url=TILESERVER_URL,
                            nominatim_url=NOMINATIM_URL)
 
+@app.route("/info")
+def info():
+    manifest = _service_manifest()
+    examples = [
+        {
+            "title": "Adresse suchen",
+            "method": "POST",
+            "path": "/api/geocode",
+            "json": {"query": "Kölner Dom", "limit": 5},
+        },
+        {
+            "title": "Koordinate in Adresse auflösen",
+            "method": "POST",
+            "path": "/api/reverse",
+            "json": {"lat": 50.9413, "lon": 6.9583, "zoom": 18},
+        },
+        {
+            "title": "Route mit mehreren Punkten",
+            "method": "POST",
+            "path": "/api/route",
+            "json": {
+                "profile": "car",
+                "points": [
+                    [50.9413, 6.9583],
+                    [51.2277, 6.7735],
+                ],
+            },
+        },
+        {
+            "title": "POIs in Bounding Box suchen",
+            "method": "POST",
+            "path": "/api/poi",
+            "json": {"category": "pharmacy", "bbox": [50.90, 6.90, 50.99, 7.05]},
+        },
+    ]
+    return render_template(
+        "info.html",
+        manifest=manifest,
+        endpoints=_api_catalog_endpoints(),
+        examples=examples,
+    )
+
 
 @app.route("/route")
 def route_page():
@@ -759,6 +860,10 @@ def api_capabilities():
 @app.route("/api/service-manifest")
 def api_service_manifest():
     return jsonify(_service_manifest())
+
+@app.get("/api")
+def api_catalog():
+    return jsonify(ok=True, endpoints=_api_catalog_endpoints())
 
 @app.get("/api/portal/status")
 def api_portal_status():
