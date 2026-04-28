@@ -2,9 +2,14 @@ import json
 import os
 import re
 import shutil
+import socket
+import platform
 import subprocess
 import time
+import uuid
+import hashlib
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import requests
 from dotenv import load_dotenv
@@ -13,6 +18,8 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 BASE_DIR   = Path(__file__).resolve().parent
 CONFIG_DIR = BASE_DIR / "config"
 DOCKER_DIR = BASE_DIR / "docker"
+RUNTIME_DIR = BASE_DIR / "runtime"
+PORTAL_CONFIG_PATH = RUNTIME_DIR / "portal-config.json"
 
 
 def _load_env():
@@ -223,6 +230,110 @@ def _service_manifest() -> dict:
             ],
         },
     }
+
+def _load_portal_config() -> dict:
+    if not PORTAL_CONFIG_PATH.exists():
+        return {"portal": {}}
+    try:
+        raw = json.loads(PORTAL_CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {"portal": {}}
+    if not isinstance(raw, dict):
+        return {"portal": {}}
+    portal = raw.get("portal")
+    raw["portal"] = portal if isinstance(portal, dict) else {}
+    return raw
+
+
+def _save_portal_config(cfg: dict) -> None:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    PORTAL_CONFIG_PATH.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _portal_registered(portal: dict) -> bool:
+    return bool(
+        str(portal.get("url") or "").strip()
+        and str(portal.get("node_uuid") or "").strip()
+        and str(portal.get("client_id") or "").strip()
+    )
+
+
+def _mask_key(raw: str) -> str:
+    token = str(raw or "").strip()
+    if not token:
+        return ""
+    if len(token) <= 8:
+        return "*" * len(token)
+    return f"{token[:4]}***{token[-4:]}"
+
+
+def _get_machine_id() -> str:
+    try:
+        machine_id_file = Path("/etc/machine-id")
+        if machine_id_file.exists():
+            value = machine_id_file.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+    except Exception:
+        pass
+    return hashlib.sha256(f"{socket.gethostname()}:{uuid.getnode()}".encode("utf-8")).hexdigest()
+
+
+def _get_local_ip() -> str:
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("8.8.8.8", 80))
+        ip = sock.getsockname()[0]
+        sock.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+def _do_portal_sync(cfg: Optional[dict] = None) -> dict:
+    config = cfg or _load_portal_config()
+    portal = config.get("portal") if isinstance(config.get("portal"), dict) else {}
+    portal_url = str(portal.get("url") or "").strip()
+    node_uuid = str(portal.get("node_uuid") or "").strip()
+    client_id = str(portal.get("client_id") or "").strip()
+    api_key = str(portal.get("api_key") or "").strip()
+    if not portal_url or not node_uuid or not client_id or not api_key:
+        return {"ok": False, "error": "not_registered", "message": "Portal-Credentials fehlen. POST /api/portal/register zuerst."}
+
+    manifest = _service_manifest()
+    payload = {
+        "nodeUuid": node_uuid,
+        "clientId": client_id,
+        "service": manifest.get("service", {}),
+        "capabilities": manifest.get("capabilities", []),
+        "routing": manifest.get("routing", {}),
+        "endpoints": manifest.get("endpoints", {}),
+    }
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        resp = requests.post(
+            f"{portal_url.rstrip('/')}/api/jarvis/node/sync",
+            json=payload,
+            headers=headers,
+            timeout=15,
+        )
+        data = resp.json()
+    except Exception as exc:
+        return {"ok": False, "error": "portal_unreachable", "message": f"Portal nicht erreichbar: {exc}"}
+
+    if not data.get("ok"):
+        return {
+            "ok": False,
+            "error": "sync_failed",
+            "message": data.get("message", "Sync fehlgeschlagen."),
+            "status": resp.status_code,
+            "response": data,
+        }
+    return {"ok": True, "status": resp.status_code, "response": data}
 
 
 @app.after_request
@@ -648,6 +759,180 @@ def api_capabilities():
 @app.route("/api/service-manifest")
 def api_service_manifest():
     return jsonify(_service_manifest())
+
+@app.get("/api/portal/status")
+def api_portal_status():
+    cfg = _load_portal_config()
+    portal = cfg.get("portal") or {}
+    return jsonify(
+        ok=True,
+        registered=_portal_registered(portal),
+        portalUrl=portal.get("url") or None,
+        nodeUuid=portal.get("node_uuid") or None,
+        nodeSlug=portal.get("node_slug") or None,
+        machineId=_get_machine_id(),
+        clientId=portal.get("client_id") or None,
+        apiKeyMasked=_mask_key(portal.get("api_key") or ""),
+    )
+
+
+@app.post("/api/portal/register")
+def api_portal_register():
+    body = request.get_json(silent=True) or {}
+    cfg = _load_portal_config()
+    portal = cfg.get("portal") if isinstance(cfg.get("portal"), dict) else {}
+
+    portal_url = str(body.get("portal_url") or portal.get("url") or "").strip()
+    registration_token = str(body.get("registration_token") or body.get("token") or "").strip()
+    if not portal_url:
+        return jsonify(ok=False, error="portal_url_missing", message="Feld 'portal_url' ist erforderlich."), 400
+    if not registration_token:
+        return jsonify(ok=False, error="token_missing", message="Feld 'registration_token' ist erforderlich."), 400
+
+    local_ip = _get_local_ip()
+    hostname = socket.gethostname()
+    fp_seed = f"{hostname}:{uuid.getnode()}:{BASE_DIR}"
+    fp_hash = hashlib.sha256(fp_seed.encode("utf-8")).hexdigest()
+    reg_payload: Dict[str, Any] = {
+        "registrationToken": registration_token,
+        "nodeName": str(body.get("node_name") or f"OSM-Lab ({hostname})"),
+        "hostname": hostname,
+        "type": "server",
+        "os": platform.system().lower() or "linux",
+        "platform": f"python-flask/{platform.python_version()}",
+        "version": _service_manifest()["service"]["version"],
+        "localIp": local_ip,
+        "apiBaseUrl": f"http://{local_ip}:{FLASK_PORT}",
+        "localUrl": f"http://{local_ip}:{FLASK_PORT}",
+        "fingerprintHash": fp_hash,
+        "fingerprintVersion": "1",
+        "capabilities": _service_manifest()["capabilities"],
+        "description": "Jarvis OSM-Lab — Geocoding, Routing, POI",
+        "machineId": _get_machine_id(),
+    }
+    if str(portal.get("node_uuid") or "").strip():
+        reg_payload["nodeUuid"] = str(portal.get("node_uuid")).strip()
+
+    try:
+        resp = requests.post(
+            f"{portal_url.rstrip('/')}/api/jarvis/node/register",
+            json=reg_payload,
+            timeout=15,
+        )
+        data = resp.json()
+    except Exception as exc:
+        return jsonify(ok=False, error="portal_unreachable", message=f"Portal nicht erreichbar: {exc}"), 502
+
+    if not data.get("ok"):
+        return jsonify(
+            ok=False,
+            error="registration_failed",
+            message=data.get("message", "Registrierung fehlgeschlagen."),
+            detail=data,
+        ), resp.status_code
+
+    node_data = (data.get("data") or {}).get("node") or {}
+    auth_data = (data.get("data") or {}).get("auth") or {}
+    portal["url"] = portal_url
+    portal["client_id"] = str(auth_data.get("clientId") or portal.get("client_id") or "")
+    portal["api_key"] = str(auth_data.get("apiKey") or portal.get("api_key") or "")
+    portal["node_uuid"] = str(node_data.get("uuid") or portal.get("node_uuid") or "")
+    portal["node_slug"] = str(node_data.get("slug") or portal.get("node_slug") or "")
+    cfg["portal"] = portal
+    _save_portal_config(cfg)
+
+    sync_result = _do_portal_sync(cfg)
+    return jsonify(
+        ok=True,
+        registered=True,
+        created=bool((data.get("data") or {}).get("created")),
+        node=node_data,
+        auth={
+            "clientId": portal.get("client_id"),
+            "apiKeyPrefix": auth_data.get("apiKeyPrefix"),
+            "apiKeyMasked": auth_data.get("apiKeyMasked"),
+        },
+        sync=sync_result,
+    ), (201 if bool((data.get("data") or {}).get("created")) else 200)
+
+
+@app.post("/api/portal/sync")
+def api_portal_sync():
+    result = _do_portal_sync()
+    if not result.get("ok"):
+        return jsonify(
+            ok=False,
+            error=result.get("error", "sync_failed"),
+            message=result.get("message", ""),
+        ), 502
+    return jsonify(ok=True, sync=result.get("response", {}))
+
+
+@app.route("/link", methods=["GET", "POST"])
+def link_portal():
+    cfg = _load_portal_config()
+    portal = cfg.get("portal") or {}
+    form = {
+        "portal_url": str(portal.get("url") or "").strip(),
+        "registration_token": "",
+        "node_name": "",
+    }
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+    if request.method == "POST":
+        form["portal_url"] = str(request.form.get("portal_url") or "").strip()
+        form["registration_token"] = str(request.form.get("registration_token") or "").strip()
+        form["node_name"] = str(request.form.get("node_name") or "").strip()
+
+        if not form["portal_url"]:
+            error = "Portal-URL fehlt."
+        elif not form["registration_token"]:
+            error = "Registrierungs-Token fehlt."
+        else:
+            payload: Dict[str, Any] = {
+                "portal_url": form["portal_url"],
+                "registration_token": form["registration_token"],
+            }
+            if form["node_name"]:
+                payload["node_name"] = form["node_name"]
+
+            with app.test_request_context("/api/portal/register", method="POST", json=payload):
+                response = api_portal_register()
+            if isinstance(response, tuple):
+                flask_response, status_code = response
+            else:
+                flask_response, status_code = response, response.status_code
+            data = flask_response.get_json(silent=True) or {}
+            if int(status_code) >= 400 or not data.get("ok"):
+                error = str(data.get("message") or data.get("error") or f"HTTP {status_code}")
+            else:
+                result = data
+                cfg = _load_portal_config()
+                portal = cfg.get("portal") or {}
+                form["portal_url"] = str(portal.get("url") or form["portal_url"]).strip()
+                form["registration_token"] = ""
+
+    return render_template(
+        "link.html",
+        form=form,
+        result=result,
+        error=error,
+        portal_status={
+            "registered": _portal_registered(portal),
+            "portal_url": portal.get("url") or "",
+            "node_uuid": portal.get("node_uuid") or "",
+            "node_slug": portal.get("node_slug") or "",
+            "machine_id": _get_machine_id(),
+            "client_id": portal.get("client_id") or "",
+            "api_key_masked": _mask_key(str(portal.get("api_key") or "")),
+        },
+    )
+
+
+@app.get("/relink")
+def relink_portal():
+    return link_portal()
 
 
 @app.route("/api/setup/state")
