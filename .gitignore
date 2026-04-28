@@ -32,16 +32,21 @@ docker/ors/ors-docker/files/*.pbf
 docker/ors/ors-docker/files/*.gz
 docker/ors/ors-docker/files/*.osm.pbf
 
-# ── Lokale OSM-Daten im Repo-Root (sollen außerhalb von Git bleiben) ─────────
-/docker/tileserver/*.mbtiles
-/graphhopper/
-/mbtiles/
-/nominatim-data/
-/ors/
-/osm-bright/
-/osm-import/
-/overpass-data/
-
 # ── Backup-Dateien ────────────────────────────────────────────────────────────
 docker/docker-compose.yml.bak-*
 config/osm.env.bak-*
+
+# OSM Runtime Data
+nominatim-data/
+graphhopper/
+mbtiles/
+ors/
+osm-import/
+overpass-data/
+osm-bright/
+
+# Tiles
+*.mbtiles
+
+# Temp / scripts
+*.bz2

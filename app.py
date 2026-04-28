@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import requests
@@ -25,6 +26,7 @@ _load_env()
 FLASK_HOST  = os.environ.get("FLASK_HOST", "0.0.0.0")
 FLASK_PORT  = int(os.environ.get("FLASK_PORT", "5079"))
 FLASK_DEBUG = os.environ.get("FLASK_DEBUG", "0") == "1"
+API_CORS_ALLOW_ORIGIN = os.environ.get("API_CORS_ALLOW_ORIGIN", "*").strip() or "*"
 
 NOMINATIM_URL     = os.environ.get("NOMINATIM_URL",     "http://localhost:7071").rstrip("/")
 ORS_URL           = os.environ.get("ORS_URL",           "http://localhost:8082").rstrip("/")
@@ -64,6 +66,60 @@ def _http_ok(url: str) -> tuple[bool, int]:
         return r.status_code < 500, r.status_code
     except Exception:
         return False, 0
+
+
+def _get_json_with_retry(url: str, *, params: dict | None = None,
+                         timeout: int | float = TIMEOUT,
+                         headers: dict | None = None,
+                         attempts: int = 3) -> tuple[int, object]:
+    last_status = 0
+    last_error = None
+    for i in range(max(1, attempts)):
+        try:
+            r = requests.get(url, params=params, timeout=timeout, headers=headers)
+            last_status = r.status_code
+            if r.status_code >= 500 and i + 1 < attempts:
+                time.sleep(0.25 * (i + 1))
+                continue
+            return r.status_code, r.json()
+        except requests.exceptions.JSONDecodeError as e:
+            last_error = e
+            break
+        except Exception as e:
+            last_error = e
+            if i + 1 < attempts:
+                time.sleep(0.25 * (i + 1))
+                continue
+    if last_error:
+        raise last_error
+    return last_status, {}
+
+
+def _post_json_with_retry(url: str, *, data: dict | None = None,
+                          timeout: int | float = 30,
+                          headers: dict | None = None,
+                          attempts: int = 2) -> tuple[int, object]:
+    last_status = 0
+    last_error = None
+    for i in range(max(1, attempts)):
+        try:
+            r = requests.post(url, data=data, timeout=timeout, headers=headers)
+            last_status = r.status_code
+            if r.status_code >= 500 and i + 1 < attempts:
+                time.sleep(0.25 * (i + 1))
+                continue
+            return r.status_code, r.json()
+        except requests.exceptions.JSONDecodeError as e:
+            last_error = e
+            break
+        except Exception as e:
+            last_error = e
+            if i + 1 < attempts:
+                time.sleep(0.25 * (i + 1))
+                continue
+    if last_error:
+        raise last_error
+    return last_status, {}
 
 
 def _docker_state(container: str) -> str:
@@ -107,6 +163,75 @@ def _build_status() -> dict:
             entry["nominatim"] = _nominatim_progress()
         services.append(entry)
     return {"services": services}
+
+
+def _service_manifest() -> dict:
+    base = request.url_root.rstrip("/")
+    return {
+        "service": {
+            "name": "Joormann Media Jarvis OSM Lab",
+            "slug": "jarvis-osm-lab",
+            "version": "2026.04",
+            "runtime": "flask",
+        },
+        "node": {
+            "hostname": os.environ.get("HOSTNAME", ""),
+            "data_root": OSM_DATA_ROOT,
+        },
+        "endpoints": {
+            "ui": base + "/",
+            "health": base + "/health",
+            "status": base + "/api/status",
+            "manifest": base + "/api/service-manifest",
+            "capabilities": base + "/api/capabilities",
+            "geocode": base + "/api/geocode",
+            "reverse": base + "/api/reverse",
+            "route": base + "/api/route",
+            "poi": base + "/api/poi",
+            "poi_categories": base + "/api/poi/categories",
+            "route_ui": base + "/route",
+            "map_ui": base + "/",
+        },
+        "capabilities": [
+            "geo.geocode",
+            "geo.reverse_geocode",
+            "geo.address_search",
+            "map.route_plan",
+            "map.route_plan.multistop",
+            "map.poi_search",
+            "map.tiles.vector",
+            "jarvis.routing.osm_lab",
+        ],
+        "routing": {
+            "profiles": ["car", "foot", "bike"],
+            "poi_categories": list(_POI_CATEGORIES.keys()) if "_POI_CATEGORIES" in globals() else [],
+            "intents": [
+                "address_lookup",
+                "route_planning",
+                "poi_lookup",
+            ],
+        },
+        "integration": {
+            "family_panel_ready": True,
+            "cors_allow_origin": API_CORS_ALLOW_ORIGIN,
+            "auth": "none",
+            "notes": [
+                "POST /api/geocode mit {query, limit}",
+                "POST /api/reverse mit {lat, lon, zoom?}",
+                "POST /api/route mit {profile, points:[[lat,lon], ...]}",
+                "POST /api/poi mit {category, bbox:[south,west,north,east]}",
+            ],
+        },
+    }
+
+
+@app.after_request
+def add_cors_headers(response):
+    if request.path.startswith("/api/") or request.path == "/health":
+        response.headers["Access-Control-Allow-Origin"] = API_CORS_ALLOW_ORIGIN
+        response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -489,9 +614,40 @@ def setup_page():
     return render_template("setup.html")
 
 
+@app.route("/health")
+def health():
+    status = _build_status()
+    services = status.get("services", [])
+    healthy = sum(1 for svc in services if svc.get("http_ok"))
+    overall = "healthy" if healthy == len(services) and services else "degraded"
+    return jsonify({
+        "status": overall,
+        "service": "jarvis-osm-lab",
+        "healthy_services": healthy,
+        "total_services": len(services),
+        "services": services,
+    })
+
+
 @app.route("/api/status")
 def api_status():
     return jsonify(_build_status())
+
+
+@app.route("/api/capabilities")
+def api_capabilities():
+    manifest = _service_manifest()
+    return jsonify({
+        "service": manifest["service"],
+        "capabilities": manifest["capabilities"],
+        "routing": manifest["routing"],
+        "endpoints": manifest["endpoints"],
+    })
+
+
+@app.route("/api/service-manifest")
+def api_service_manifest():
+    return jsonify(_service_manifest())
 
 
 @app.route("/api/setup/state")
@@ -667,17 +823,96 @@ def api_geocode():
     query = (data.get("query") or "").strip()
     if not query:
         return jsonify({"error": "Kein Suchbegriff angegeben"}), 400
-
-    params = {"q": query, "format": "jsonv2", "addressdetails": 1,
-              "limit": int(data.get("limit", 10)), "accept-language": "de"}
+    limit = max(1, min(25, int(data.get("limit", 10))))
     try:
-        r = requests.get(NOMINATIM_URL + "/search", params=params, timeout=TIMEOUT,
-                         headers={"User-Agent": "Joormann-OSM-Lab/1.0"})
-        r.raise_for_status()
-        return jsonify({"results": r.json()})
+        results = _nominatim_search(query, limit=limit)
+        if results:
+            return jsonify({"results": results, "source": "nominatim"})
+
+        poi_category, location_query = _extract_poi_query(query)
+        if poi_category and location_query:
+            anchors = _nominatim_search(location_query, limit=3)
+            if anchors:
+                anchor = anchors[0]
+                alat = float(anchor["lat"])
+                alon = float(anchor["lon"])
+                label, pois = _query_poi(poi_category, _poi_bbox_for_point(alat, alon))
+                pois = sorted(
+                    pois,
+                    key=lambda item: _distance_score(alat, alon, float(item["lat"]), float(item["lon"]))
+                )[:limit]
+                mapped = []
+                for item in pois:
+                    tags = item.get("tags") or {}
+                    display_parts = [
+                        item.get("name") or label,
+                        tags.get("addr:street") or tags.get("road"),
+                        tags.get("addr:housenumber") or tags.get("housenumber"),
+                        tags.get("addr:postcode") or tags.get("postcode"),
+                        tags.get("addr:city") or tags.get("city") or tags.get("town"),
+                    ]
+                    mapped.append({
+                        "place_id": item.get("id"),
+                        "osm_type": item.get("type"),
+                        "osm_id": item.get("id"),
+                        "lat": str(item["lat"]),
+                        "lon": str(item["lon"]),
+                        "category": "amenity",
+                        "type": poi_category,
+                        "display_name": ", ".join(str(p) for p in display_parts if p),
+                        "name": item.get("name") or label,
+                        "address": tags,
+                    })
+                if mapped:
+                    return jsonify({
+                        "results": mapped,
+                        "source": "poi-fallback",
+                        "anchor": anchor,
+                    })
+
+        return jsonify({"results": [], "source": "nominatim"})
     except requests.exceptions.ConnectionError:
         return jsonify({"error": "Nominatim nicht erreichbar"}), 503
     except Exception as e:
+        poi_category, location_query = _extract_poi_query(query)
+        if poi_category and location_query:
+            try:
+                anchors = _nominatim_search(location_query, limit=3)
+                if anchors:
+                    anchor = anchors[0]
+                    alat = float(anchor["lat"])
+                    alon = float(anchor["lon"])
+                    label, pois = _query_poi(poi_category, _poi_bbox_for_point(alat, alon))
+                    pois = sorted(
+                        pois,
+                        key=lambda item: _distance_score(alat, alon, float(item["lat"]), float(item["lon"]))
+                    )[:limit]
+                    mapped = [{
+                        "place_id": item.get("id"),
+                        "osm_type": item.get("type"),
+                        "osm_id": item.get("id"),
+                        "lat": str(item["lat"]),
+                        "lon": str(item["lon"]),
+                        "category": "amenity",
+                        "type": poi_category,
+                        "display_name": ", ".join(str(p) for p in [
+                            item.get("name") or label,
+                            (item.get("tags") or {}).get("addr:street") or (item.get("tags") or {}).get("road"),
+                            (item.get("tags") or {}).get("addr:housenumber") or (item.get("tags") or {}).get("housenumber"),
+                            (item.get("tags") or {}).get("addr:postcode") or (item.get("tags") or {}).get("postcode"),
+                            (item.get("tags") or {}).get("addr:city") or (item.get("tags") or {}).get("city") or (item.get("tags") or {}).get("town"),
+                        ] if p),
+                        "name": item.get("name") or label,
+                        "address": item.get("tags") or {},
+                    } for item in pois]
+                    if mapped:
+                        return jsonify({
+                            "results": mapped,
+                            "source": "poi-fallback-after-error",
+                            "anchor": anchor,
+                        })
+            except Exception:
+                pass
         return jsonify({"error": str(e)}), 500
 
 
@@ -749,6 +984,110 @@ _POI_CATEGORIES = {
     "convenience":  ("shop",    "convenience",  "Kiosk"),
 }
 
+_POI_QUERY_ALIASES = {
+    "apotheke": "pharmacy",
+    "bar": "bar",
+    "kneipe": "pub",
+    "pub": "pub",
+    "restaurant": "restaurant",
+    "cafe": "cafe",
+    "café": "cafe",
+    "tankstelle": "fuel",
+    "bank": "bank",
+    "geldautomat": "atm",
+    "krankenhaus": "hospital",
+    "arzt": "doctors",
+    "schule": "school",
+    "supermarkt": "supermarket",
+    "bäckerei": "bakery",
+    "baeckerei": "bakery",
+    "kiosk": "convenience",
+}
+
+
+def _nominatim_search(query: str, limit: int = 10) -> list[dict]:
+    params = {
+        "q": query,
+        "format": "jsonv2",
+        "addressdetails": 1,
+        "limit": limit,
+        "accept-language": "de",
+    }
+    status, payload = _get_json_with_retry(
+        NOMINATIM_URL + "/search",
+        params=params,
+        timeout=max(TIMEOUT, 8),
+        headers={"User-Agent": "Joormann-OSM-Lab/1.0"},
+        attempts=3,
+    )
+    if status >= 400:
+        raise requests.HTTPError(f"{status} for {query}")
+    return payload if isinstance(payload, list) else []
+
+
+def _extract_poi_query(query: str) -> tuple[str | None, str]:
+    q = re.sub(r"\s+", " ", query.strip())
+    if not q:
+        return None, ""
+    parts = q.split(" ", 1)
+    token = parts[0].lower()
+    category = _POI_QUERY_ALIASES.get(token)
+    if not category:
+        return None, q
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    return category, rest
+
+
+def _poi_bbox_for_point(lat: float, lon: float, radius_deg: float = 0.04) -> list[float]:
+    return [lat - radius_deg, lon - radius_deg, lat + radius_deg, lon + radius_deg]
+
+
+def _distance_score(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    return ((lat1 - lat2) ** 2 + (lon1 - lon2) ** 2) ** 0.5
+
+
+def _query_poi(category: str, bbox: list[float]) -> tuple[str, list[dict]]:
+    s, w, n, e = bbox
+    key, value, label = _POI_CATEGORIES[category]
+    query = (
+        f"[out:json][timeout:25];"
+        f"("
+        f"  node[\"{key}\"=\"{value}\"]({s},{w},{n},{e});"
+        f"  way[\"{key}\"=\"{value}\"]({s},{w},{n},{e});"
+        f");"
+        f"out center tags;"
+    )
+    status, payload = _post_json_with_retry(
+        OVERPASS_URL + "/api/interpreter",
+        data={"data": query},
+        timeout=30,
+        headers={"User-Agent": "Joormann-OSM-Lab/1.0"},
+        attempts=2,
+    )
+    if status >= 400:
+        raise requests.HTTPError(f"Overpass {status}")
+    op = payload if isinstance(payload, dict) else {}
+
+    pois = []
+    for el in op.get("elements", []):
+        if el.get("type") == "node":
+            lat, lon = el.get("lat"), el.get("lon")
+        else:
+            c = el.get("center") or {}
+            lat, lon = c.get("lat"), c.get("lon")
+        if lat is None or lon is None:
+            continue
+        tags = el.get("tags") or {}
+        pois.append({
+            "id": el.get("id"),
+            "type": el.get("type"),
+            "lat": lat,
+            "lon": lon,
+            "name": tags.get("name") or label,
+            "tags": tags,
+        })
+    return label, pois
+
 
 @app.route("/api/poi", methods=["POST"])
 def api_poi():
@@ -771,47 +1110,12 @@ def api_poi():
     if (n - s) * (e - w) > 4.0:
         return jsonify({"error": "Bbox zu groß — bitte mehr reinzoomen"}), 400
 
-    key, value, label = _POI_CATEGORIES[category]
-    query = (
-        f"[out:json][timeout:25];"
-        f"("
-        f"  node[\"{key}\"=\"{value}\"]({s},{w},{n},{e});"
-        f"  way[\"{key}\"=\"{value}\"]({s},{w},{n},{e});"
-        f");"
-        f"out center tags;"
-    )
-
     try:
-        r = requests.post(OVERPASS_URL + "/api/interpreter",
-                          data={"data": query}, timeout=30,
-                          headers={"User-Agent": "Joormann-OSM-Lab/1.0"})
-        if r.status_code >= 400:
-            return jsonify({"error": f"Overpass {r.status_code}"}), 502
-        op = r.json()
+        label, pois = _query_poi(category, [s, w, n, e])
     except requests.exceptions.ConnectionError:
         return jsonify({"error": "Overpass nicht erreichbar (importiert evtl. noch)"}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-    pois = []
-    for el in op.get("elements", []):
-        # node hat lat/lon direkt, way hat center.lat/lon
-        if el.get("type") == "node":
-            lat, lon = el.get("lat"), el.get("lon")
-        else:
-            c = el.get("center") or {}
-            lat, lon = c.get("lat"), c.get("lon")
-        if lat is None or lon is None:
-            continue
-        tags = el.get("tags") or {}
-        pois.append({
-            "id":       el.get("id"),
-            "type":     el.get("type"),
-            "lat":      lat,
-            "lon":      lon,
-            "name":     tags.get("name") or label,
-            "tags":     tags,
-        })
     return jsonify({"category": category, "label": label, "results": pois})
 
 

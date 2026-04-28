@@ -1,20 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Falls die aufrufende Shell die docker-Gruppe nicht geladen hat (Login-Session
-# vor `usermod -aG docker` gestartet), per `sg docker` re-exec'en, damit der
-# Flask-Prozess Zugriff auf den Docker-Socket bekommt — sonst zeigt die
-# Status-Seite alle Container als "not found".
-if [[ -z "${OSM_LAB_SG_DOCKER:-}" ]] && getent group docker >/dev/null 2>&1; then
-  if id -nG | tr ' ' '\n' | grep -qx docker; then
-    : # Shell hat docker-Gruppe — alles gut
-  elif id -nG djanebmb 2>/dev/null | tr ' ' '\n' | grep -qx docker \
-       || getent group docker | cut -d: -f4 | tr ',' '\n' | grep -qx "$USER"; then
-    export OSM_LAB_SG_DOCKER=1
-    exec sg docker -c "$(printf '%q ' "${BASH_SOURCE[0]}" "$@")"
-  fi
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -53,6 +39,16 @@ echo "Installiere/aktualisiere Requirements …"
 "$PYTHON_BIN" -m pip install -q --upgrade pip
 "$PYTHON_BIN" -m pip install -q -r "$PROJECT_ROOT/requirements.txt"
 
+RUN_WITH_SG_DOCKER=0
+if getent group docker >/dev/null 2>&1; then
+  if id -nG | tr ' ' '\n' | grep -qx docker; then
+    RUN_WITH_SG_DOCKER=0
+  elif id -nG "$USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker \
+       || getent group docker | cut -d: -f4 | tr ',' '\n' | grep -qx "$USER"; then
+    RUN_WITH_SG_DOCKER=1
+  fi
+fi
+
 if [[ -f "$PID_FILE" ]]; then
   existing="$(cat "$PID_FILE")"
   if [[ -n "$existing" ]] && kill -0 "$existing" 2>/dev/null; then
@@ -70,13 +66,18 @@ fi
 
 (
   cd "$PROJECT_ROOT"
-  nohup env FLASK_HOST="$FLASK_HOST" FLASK_PORT="$FLASK_PORT" FLASK_DEBUG="$FLASK_DEBUG" \
-    "$PYTHON_BIN" app.py >>"$LOG_FILE" 2>&1 &
-  echo $! > "$PID_FILE"
+  if [[ "$RUN_WITH_SG_DOCKER" == "1" ]]; then
+    setsid -f sg docker -c "$(printf 'cd %q && exec env FLASK_HOST=%q FLASK_PORT=%q FLASK_DEBUG=%q %q app.py' \
+      "$PROJECT_ROOT" "$FLASK_HOST" "$FLASK_PORT" "$FLASK_DEBUG" "$PYTHON_BIN")" >>"$LOG_FILE" 2>&1 </dev/null
+  else
+    setsid -f env FLASK_HOST="$FLASK_HOST" FLASK_PORT="$FLASK_PORT" FLASK_DEBUG="$FLASK_DEBUG" \
+      "$PYTHON_BIN" app.py >>"$LOG_FILE" 2>&1 </dev/null
+  fi
 )
 
 sleep 1
-pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+pid="$(pgrep -f "$PYTHON_BIN app.py" | tail -n 1 || true)"
+[[ -n "$pid" ]] && echo "$pid" > "$PID_FILE"
 if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
   echo "Gestartet: jarvis-osm-lab (PID $pid)"
   echo "URL:  http://${FLASK_HOST}:${FLASK_PORT}"
