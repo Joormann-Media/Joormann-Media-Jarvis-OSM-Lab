@@ -162,6 +162,7 @@
   <h4>System</h4>
   <a href="#health">Health / Status</a>
   <a href="#manifest">Manifest</a>
+  <a href="#update-check">Update-Prüfung</a>
   <a href="#portal">Portal-Node</a>
 </aside>
 
@@ -663,7 +664,120 @@ curl -X POST <span class="url">BASE/api/isochrone</span> \
       </div>
     </div>
   </div>
+
+  <div class="ep" id="update-check">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-get">GET</span>
+      <div>
+        <div class="ep-path">/api/update/status</div>
+        <div class="ep-desc">Update-Status prüfen — git fetch + Vergleich mit origin, kein Schreiben</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Response</div>
+      <div class="param-row"><span class="param-name">update_available</span><span class="param-type">bool</span><span class="param-desc">true wenn Remote-Branch voraus ist</span></div>
+      <div class="param-row"><span class="param-name">local_commit</span><span class="param-type">string</span><span class="param-desc">Aktueller lokaler Commit (12 Zeichen)</span></div>
+      <div class="param-row"><span class="param-name">remote_commit</span><span class="param-type">string</span><span class="param-desc">Aktueller Remote-Commit</span></div>
+      <div class="param-row"><span class="param-name">behind</span><span class="param-type">int</span><span class="param-desc">Anzahl Commits hinter Remote</span></div>
+      <div class="param-row"><span class="param-name">branch</span><span class="param-type">string</span><span class="param-desc">Aktiver Branch</span></div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl <span class="url">BASE/api/update/status</span>
+
+{<span class="key">"ok"</span>:<span class="num">true</span>, <span class="key">"code"</span>:<span class="str">"ok"</span>, <span class="key">"message"</span>:<span class="str">"Up-to-date"</span>,
+ <span class="key">"update_available"</span>:<span class="num">false</span>,
+ <span class="key">"local_commit"</span>:<span class="str">"7a23f21cde40"</span>, <span class="key">"remote_commit"</span>:<span class="str">"7a23f21cde40"</span>,
+ <span class="key">"branch"</span>:<span class="str">"main"</span>, <span class="key">"ahead"</span>:<span class="num">0</span>, <span class="key">"behind"</span>:<span class="num">0</span>}</div>
+      </div>
+
+      <div id="update-ui" style="margin-top:1rem;">
+        <button onclick="checkUpdate()" style="background:var(--blue-dim);border:1px solid var(--blue);color:#93c5fd;border-radius:.4rem;padding:.4rem 1rem;font-size:.82rem;cursor:pointer;">
+          Update-Status prüfen
+        </button>
+        <button id="apply-btn" onclick="applyUpdate()" style="display:none;background:var(--green-dim);border:1px solid var(--green);color:var(--green);border-radius:.4rem;padding:.4rem 1rem;font-size:.82rem;cursor:pointer;margin-left:.5rem;">
+          Update installieren
+        </button>
+        <div id="update-result" style="margin-top:.75rem;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/update/apply</div>
+        <div class="ep-desc">Update ausführen — git pull, pip install, Neustart via stop-all/start-all</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div style="background:rgba(249,115,22,.07);border:1px solid #78350f;border-radius:.4rem;padding:.6rem .875rem;font-size:.82rem;color:#fde68a;margin-bottom:.5rem;">
+        <strong>Achtung:</strong> Der Service startet neu — laufende Requests werden unterbrochen.
+        Führt automatisch <code>scripts/stop-all.sh</code> + <code>scripts/start-all.sh</code> aus, falls vorhanden.
+      </div>
+      <div class="sub-label">Response — wie /api/update/status, plus</div>
+      <div class="param-row"><span class="param-name">restarted</span><span class="param-type">bool</span><span class="param-desc">Ob der Neustart via Script ausgeführt wurde</span></div>
+      <div class="param-row"><span class="param-name">log</span><span class="param-type">string</span><span class="param-desc">Vollständiger Shell-Output (git, pip, restart)</span></div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/update/apply</span></div>
+      </div>
+    </div>
+  </div>
 </div>
+
+<script>
+async function checkUpdate() {
+  const el = document.getElementById('update-result');
+  const applyBtn = document.getElementById('apply-btn');
+  el.innerHTML = '<span style="color:var(--muted)">Prüfe…</span>';
+  applyBtn.style.display = 'none';
+  try {
+    const res = await fetch(BASE + '/api/update/status');
+    const d = await res.json();
+    if (d.update_available) {
+      el.innerHTML = `<div style="background:rgba(34,197,94,.07);border:1px solid #166534;border-radius:.4rem;padding:.6rem .875rem;font-size:.82rem;">
+        <strong style="color:var(--green);">Update verfügbar</strong> — ${d.behind} Commit(s) hinter <code>${d.remote_commit}</code><br>
+        <span style="color:var(--muted);">Lokal: <code>${d.local_commit}</code> · Branch: <code>${d.branch}</code></span>
+      </div>`;
+      applyBtn.style.display = 'inline-block';
+    } else {
+      el.innerHTML = `<div style="background:rgba(59,130,246,.07);border:1px solid var(--border);border-radius:.4rem;padding:.6rem .875rem;font-size:.82rem;color:var(--muted);">
+        Aktuell — <code>${d.local_commit}</code> · Branch <code>${d.branch}</code>
+      </div>`;
+    }
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--red);">Fehler: ${e.message}</span>`;
+  }
+}
+async function applyUpdate() {
+  const el = document.getElementById('update-result');
+  const applyBtn = document.getElementById('apply-btn');
+  applyBtn.disabled = true;
+  applyBtn.textContent = 'Installiere…';
+  el.innerHTML = '<span style="color:var(--muted)">Update läuft — bitte warten…</span>';
+  try {
+    const res = await fetch(BASE + '/api/update/apply', {method: 'POST'});
+    const d = await res.json();
+    if (d.ok) {
+      el.innerHTML = `<div style="background:rgba(34,197,94,.07);border:1px solid #166534;border-radius:.4rem;padding:.6rem .875rem;font-size:.82rem;">
+        <strong style="color:var(--green);">Update abgeschlossen</strong>${d.restarted ? ' · Service neu gestartet' : ''}<br>
+        <code>${d.local_commit}</code> · Branch <code>${d.branch}</code>
+        ${d.log ? '<details style="margin-top:.5rem;"><summary style="cursor:pointer;color:var(--dim);">Log anzeigen</summary><pre style="margin:.5rem 0 0;font-size:.75rem;max-height:200px;overflow-y:auto;background:#0d1117;padding:.5rem;border-radius:.3rem;">' + d.log + '</pre></details>' : ''}
+      </div>`;
+    } else {
+      el.innerHTML = `<div style="background:rgba(239,68,68,.07);border:1px solid #450a0a;border-radius:.4rem;padding:.6rem .875rem;font-size:.82rem;color:#fca5a5;">
+        <strong>Fehler:</strong> ${d.message || d.code}
+        ${d.log ? '<details style="margin-top:.5rem;"><summary style="cursor:pointer;">Log</summary><pre style="font-size:.75rem;max-height:200px;overflow-y:auto;">' + d.log + '</pre></details>' : ''}
+      </div>`;
+    }
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--red);">Fehler: ${e.message}</span>`;
+  }
+  applyBtn.disabled = false;
+  applyBtn.textContent = 'Update installieren';
+}
+</script>
 
 <!-- ═══ PORTAL ═══ -->
 <div id="portal" class="card" style="border-color:#6b21a8;">

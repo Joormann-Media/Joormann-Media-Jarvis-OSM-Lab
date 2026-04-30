@@ -300,6 +300,8 @@ def _api_catalog_description(method: str, path: str) -> str:
         ("GET",  "/api/portal/status"):        "Status der Jarvis-Node-Registrierung.",
         ("POST", "/api/portal/register"):      "OSM-Lab am Family-Panel registrieren.",
         ("POST", "/api/portal/sync"):          "Capabilities/Endpoints ans Portal synchronisieren.",
+        ("GET",  "/api/update/status"):        "Update-Status pruefen (git fetch + behind-Pruefung).",
+        ("POST", "/api/update/apply"):         "Update ausfuehren (git pull + Requirements + Neustart).",
     }
     return descriptions.get(key, "")
 
@@ -1104,6 +1106,60 @@ def api_portal_sync():
             message=result.get("message", ""),
         ), 502
     return jsonify(ok=True, sync=result.get("response", {}))
+
+
+# ---------------------------------------------------------------------------
+# Update-Management
+# ---------------------------------------------------------------------------
+
+def _run_repo_update(mode: str) -> tuple[dict, int]:
+    script = BASE_DIR / "scripts" / "update_manager.sh"
+    if not script.exists():
+        return {"ok": False, "code": "update_script_missing",
+                "message": f"Script fehlt: {script}"}, 500
+    timeout = 1800 if mode == "apply" else 45
+    try:
+        proc = subprocess.run(
+            ["bash", str(script), mode],
+            text=True, capture_output=True, timeout=timeout,
+        )
+    except Exception as exc:
+        return {"ok": False, "code": "update_exec_failed", "message": str(exc)}, 500
+
+    raw = (proc.stdout or "").strip()
+    payload: dict = {}
+    if raw:
+        try:
+            payload = json.loads(raw.splitlines()[-1])
+        except Exception:
+            payload = {}
+
+    if not isinstance(payload, dict) or not payload:
+        payload = {
+            "ok": proc.returncode == 0,
+            "code": "update_output_invalid",
+            "message": "Ungültige Update-Antwort",
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+        }
+    if proc.returncode != 0:
+        payload["ok"] = False
+        payload.setdefault("code", "update_failed")
+        payload.setdefault("message", "Update fehlgeschlagen")
+
+    return payload, (200 if payload.get("ok") else 500)
+
+
+@app.get("/api/update/status")
+def api_update_status():
+    payload, status = _run_repo_update("status")
+    return jsonify(payload), status
+
+
+@app.post("/api/update/apply")
+def api_update_apply():
+    payload, status = _run_repo_update("apply")
+    return jsonify(payload), status
 
 
 @app.route("/link", methods=["GET", "POST"])
