@@ -1,94 +1,755 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OSM-Lab API Info</title>
+  <title>API-Dokumentation – Jarvis OSM-Lab</title>
   <style>
-    :root { --bg:#0b1220; --panel:#111827; --text:#e5e7eb; --muted:#9ca3af; --line:#334155; --btn:#2563eb; }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: Arial, sans-serif; background: linear-gradient(130deg,#020617,#0f172a); color: var(--text); }
-    .navbar { background: rgba(10, 18, 30, .92); border-bottom: 1px solid var(--line); padding: .75rem 1.5rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1000; }
-    .navbar-brand { font-size: 1.05rem; font-weight: 800; color: #7dd3fc; text-decoration: none; letter-spacing: .04em; text-transform: uppercase; }
-    .nav-link { color: var(--muted); text-decoration: none; font-size: .9rem; margin-left: 1rem; }
-    .nav-link:hover, .nav-link.active { color: var(--text); }
-    .wrap { max-width: 1050px; margin: 0 auto; padding: 20px; }
-    .card { background: rgba(17,24,39,.92); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
-    h1,h2,h3 { margin: 0 0 10px; }
-    p { margin: 0 0 10px; color: var(--muted); }
-    .btn { display:inline-block; text-decoration:none; background:var(--btn); color:#fff; font-weight:700; padding:9px 12px; border-radius:9px; }
-    table { width:100%; border-collapse: collapse; }
-    th,td { text-align:left; border-bottom:1px solid var(--line); padding:8px; font-size:14px; vertical-align: top; }
-    th { color: var(--muted); font-weight: 600; }
-    code { background:#0b1020; border-radius:6px; padding:2px 6px; }
-    pre { background:#0b1020; border:1px solid var(--line); border-radius:10px; padding:10px; white-space:pre-wrap; word-break:break-word; }
-    .kpis { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+    :root {
+      --bg: #020617; --sidebar: #0b1120; --card: #111827; --card2: #1a2438;
+      --border: #1e3a5f; --border2: #334155; --text: #e2e8f0; --muted: #94a3b8; --dim: #64748b;
+      --blue: #3b82f6; --blue-dim: #1e3a5f; --green: #22c55e; --green-dim: #14532d;
+      --orange: #f97316; --orange-dim: #431407; --purple: #a855f7; --purple-dim: #3b0764;
+      --amber: #f59e0b; --amber-dim: #451a03; --red: #ef4444; --red-dim: #450a0a;
+      --teal: #14b8a6; --teal-dim: #042f2e;
+      --code-bg: rgba(59,130,246,.1); --code: #7dd3fc;
+      --get: #14532d; --get-c: #86efac;
+      --post: #1e3a5f; --post-c: #93c5fd;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif;
+           font-size: 14px; margin: 0; line-height: 1.6; }
+    a { color: var(--blue); text-decoration: none; } a:hover { color: #93c5fd; }
+    h1,h2,h3,h4 { margin: 0; font-weight: 600; }
+    code, .mono { font-family: ui-monospace, 'Cascadia Code', monospace; font-size: .82em; }
+    code { background: var(--code-bg); color: var(--code); padding: .1rem .35rem; border-radius: .25rem; }
+
+    nav { background: var(--sidebar); border-bottom: 1px solid var(--border); padding: .7rem 1.5rem;
+          display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 50; }
+    .nav-brand { font-weight: 700; color: var(--blue); font-size: .9rem; }
+    .nav-links { display: flex; gap: .5rem; flex-wrap: wrap; }
+    .nav-links a { color: var(--muted); font-size: .8rem; padding: .2rem .5rem; border-radius: .3rem; }
+    .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--card2); }
+
+    .layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+    aside { background: var(--sidebar); border-right: 1px solid var(--border); padding: 1.25rem .75rem;
+            position: sticky; top: 45px; height: calc(100vh - 45px); overflow-y: auto; }
+    aside h4 { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--dim);
+               margin: 1rem 0 .3rem; padding: 0 .5rem; }
+    aside a { display: block; color: var(--muted); font-size: .82rem; padding: .3rem .6rem;
+              border-radius: .35rem; margin-bottom: .1rem; }
+    aside a:hover { background: var(--card2); color: var(--text); }
+    main { padding: 1.75rem 2rem; max-width: 980px; }
+
+    .card { background: var(--card); border: 1px solid var(--border2); border-radius: .75rem;
+            padding: 1.25rem; margin-bottom: 1.5rem; }
+    .section-title { display: flex; align-items: center; gap: .75rem; margin-bottom: 1rem; }
+    .section-title h2 { font-size: 1.05rem; color: var(--text); }
+    .prov-badge { display: inline-flex; align-items: center; gap: .3rem; border-radius: .4rem;
+                  padding: .25rem .6rem; font-size: .75rem; font-weight: 700; }
+    .prov-geo    { background: var(--blue-dim);  color: #93c5fd;      border: 1px solid #1e40af; }
+    .prov-route  { background: var(--green-dim); color: var(--green); border: 1px solid #166534; }
+    .prov-poi    { background: var(--amber-dim); color: var(--amber); border: 1px solid #78350f; }
+    .prov-system { background: #1e293b;           color: var(--muted); border: 1px solid var(--border2); }
+    .prov-node   { background: var(--purple-dim);color: #d8b4fe;      border: 1px solid #6b21a8; }
+
+    .m { display: inline-block; font-size: .68rem; font-weight: 700; padding: .15rem .45rem;
+         border-radius: .25rem; font-family: ui-monospace, monospace; min-width: 40px; text-align: center; }
+    .m-get  { background: var(--get);  color: var(--get-c); }
+    .m-post { background: var(--post); color: var(--post-c); }
+
+    .ep { border: 1px solid var(--border); border-radius: .5rem; margin-bottom: .75rem; overflow: hidden; }
+    .ep-header { display: flex; align-items: flex-start; gap: .75rem; padding: .75rem 1rem;
+                 cursor: pointer; user-select: none; }
+    .ep-header:hover { background: rgba(255,255,255,.02); }
+    .ep-path { font-family: ui-monospace, monospace; font-size: .87rem; color: #7dd3fc; word-break: break-all; }
+    .ep-desc { color: var(--muted); font-size: .8rem; margin-top: .2rem; }
+    .ep-body { border-top: 1px solid var(--border); padding: 1rem; display: none; }
+    .ep-body.open { display: block; }
+
+    .code-wrap { position: relative; margin: .5rem 0; }
+    .code-block { background: #0d1117; border: 1px solid var(--border); border-radius: .5rem;
+                  padding: .875rem 1rem; font-family: ui-monospace, monospace; font-size: .8rem;
+                  color: #e2e8f0; overflow-x: auto; white-space: pre; line-height: 1.7; }
+    .code-block .cmt  { color: #6e7681; }
+    .code-block .key  { color: #ff7b72; }
+    .code-block .str  { color: #a5d6ff; }
+    .code-block .num  { color: #79c0ff; }
+    .code-block .url  { color: #3fb950; }
+    .copy-btn { position: absolute; top: .5rem; right: .5rem; background: var(--card2);
+                border: 1px solid var(--border2); color: var(--muted); border-radius: .35rem;
+                padding: .2rem .55rem; font-size: .72rem; cursor: pointer; transition: all .15s; }
+    .copy-btn:hover { background: var(--border2); color: var(--text); }
+    .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+    .sub-label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+                 color: var(--dim); margin: .875rem 0 .35rem; }
+    .param-row { display: flex; align-items: baseline; gap: .75rem; padding: .3rem 0;
+                 border-bottom: 1px solid rgba(255,255,255,.04); }
+    .param-row:last-child { border-bottom: none; }
+    .param-name { font-family: ui-monospace, monospace; color: var(--code); font-size: .82rem; min-width: 140px; flex-shrink: 0; }
+    .param-type { color: var(--dim); font-size: .75rem; min-width: 80px; flex-shrink: 0; }
+    .param-desc { color: var(--muted); font-size: .8rem; }
+    .req { color: var(--orange); font-size: .68rem; margin-left: .2rem; }
+    .opt { color: var(--dim); font-size: .68rem; margin-left: .2rem; }
+
+    .hero { background: linear-gradient(135deg, #0f172a 0%, #0c2045 100%);
+            border: 1px solid var(--border2); border-radius: .75rem; padding: 1.5rem; margin-bottom: 1.75rem; }
+    .hero h1 { font-size: 1.4rem; color: #e0e7ff; margin-bottom: .4rem; }
+    .hero p { color: var(--muted); margin: 0 0 1rem; max-width: 680px; line-height: 1.7; }
+    .stat-row { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .stat { background: rgba(255,255,255,.06); border: 1px solid var(--border2); border-radius: .4rem;
+            padding: .3rem .75rem; font-size: .8rem; color: var(--muted); }
+    .stat strong { color: var(--text); }
+
+    .svc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .75rem; }
+    .svc-card { background: var(--card2); border: 1px solid var(--border); border-radius: .5rem; padding: .75rem 1rem; }
+    .svc-name { font-weight: 600; font-size: .82rem; margin-bottom: .2rem; }
+    .svc-url  { font-family: ui-monospace, monospace; font-size: .72rem; color: var(--dim); }
+
+    table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    th { color: var(--muted); font-weight: 500; font-size: .72rem; padding: .4rem .6rem;
+         border-bottom: 1px solid var(--border); text-align: left; }
+    td { padding: .45rem .6rem; border-bottom: 1px solid rgba(255,255,255,.04); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,.02); }
+
+    @media (max-width: 700px) {
+      .layout { grid-template-columns: 1fr; }
+      aside { display: none; }
+      main { padding: 1rem; }
+    }
   </style>
 </head>
 <body>
-<nav class="navbar">
-  <a class="navbar-brand" href="/">Jarvis OSM Lab</a>
-  <div>
-    <a class="nav-link d-inline" href="/">Karte</a>
-    <a class="nav-link d-inline" href="/route">Routing</a>
-    <a class="nav-link d-inline" href="/status">Status</a>
-    <a class="nav-link d-inline" href="/setup">Setup</a>
-    <a class="nav-link d-inline active" href="/info">Info</a>
-    <a class="nav-link d-inline" href="/link">Link</a>
+
+<nav>
+  <span class="nav-brand">🗺 Jarvis OSM-Lab</span>
+  <div class="nav-links">
+    <a href="/">Karte</a>
+    <a href="/route">Routing</a>
+    <a href="/status">Status</a>
+    <a href="/setup">Setup</a>
+    <a href="/link">Link</a>
+    <a href="/info" class="active">API-Docs</a>
   </div>
 </nav>
-<div class="wrap">
-  <div class="card">
-    <h1>Jarvis OSM-Lab API Info</h1>
-    <p>Endpoint-Übersicht und Beispiel-Requests für Geocode, Routing und POI.</p>
-    <a class="btn" href="/">Zurück zum Dashboard</a>
-    <a class="btn" href="/link" style="margin-left:8px;">Node-Link</a>
+
+<div class="layout">
+<aside>
+  <h4>Überblick</h4>
+  <a href="#start">Schnellstart</a>
+  <a href="#services">Services &amp; Ports</a>
+  <a href="#conventions">Konventionen</a>
+  <a href="#all-endpoints">Alle Endpunkte</a>
+
+  <h4>Geocoding</h4>
+  <a href="#geocode">Adresssuche</a>
+  <a href="#suggest">Autocomplete</a>
+  <a href="#reverse">Reverse-Geocoding</a>
+  <a href="#distance">Distanz &amp; Peilung</a>
+
+  <h4>Routing</h4>
+  <a href="#route">Route A→B</a>
+  <a href="#isochrone">Isochrone</a>
+  <a href="#matrix">Distanz-Matrix</a>
+
+  <h4>POI</h4>
+  <a href="#poi-radius">Umkreissuche</a>
+  <a href="#poi-bbox">BBox-Suche</a>
+  <a href="#poi-categories">Kategorien</a>
+
+  <h4>System</h4>
+  <a href="#health">Health / Status</a>
+  <a href="#manifest">Manifest</a>
+  <a href="#portal">Portal-Node</a>
+</aside>
+
+<main>
+
+<div id="start" class="hero">
+  <h1>Jarvis OSM-Lab API</h1>
+  <p>Vollständig lokale Geo-API: Geocoding, Autocomplete, Reverse, Routing, Isochrone, Distanz-Matrix und POI-Suche.
+     Alle Services laufen on-premise — keine externen Aufrufe, keine API-Keys, CORS offen.</p>
+  <div class="stat-row">
+    <div class="stat">Endpunkte <strong>{{ endpoints|length }}</strong></div>
+    <div class="stat">Base-URL <strong id="base-url-stat">…</strong></div>
+    <div class="stat">CORS <strong>offen (*)</strong></div>
+    <div class="stat">Auth <strong>none</strong></div>
+    <div class="stat">Version <strong>{{ manifest.service.version if manifest else '—' }}</strong></div>
+  </div>
+</div>
+
+<script>
+const BASE = window.location.origin;
+document.getElementById('base-url-stat').textContent = BASE;
+function copyCode(btn){
+  const pre = btn.parentElement.querySelector('.code-block');
+  const txt = pre.innerText.replace(/BASE/g, BASE);
+  navigator.clipboard?.writeText(txt).then(() => {
+    btn.textContent = '✓ Kopiert'; btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Kopieren'; btn.classList.remove('copied'); }, 1800);
+  });
+}
+function toggleEp(header){
+  header.nextElementSibling.classList.toggle('open');
+}
+</script>
+
+<!-- Services -->
+<div id="services" class="card">
+  <div class="section-title">
+    <span class="prov-badge prov-system">🖥 Services</span>
+    <h2>Lokale Services &amp; Ports</h2>
+  </div>
+  <div class="svc-grid">
+    <div class="svc-card">
+      <div class="svc-name" style="color:#93c5fd;">Nominatim</div>
+      <div style="color:var(--muted);font-size:.8rem;margin:.2rem 0 .4rem;">Geocoding &amp; Reverse</div>
+      <div class="svc-url">:7071</div>
+    </div>
+    <div class="svc-card">
+      <div class="svc-name" style="color:#86efac;">Overpass API</div>
+      <div style="color:var(--muted);font-size:.8rem;margin:.2rem 0 .4rem;">POI-Daten (OSM-Abfragen)</div>
+      <div class="svc-url">:7072</div>
+    </div>
+    <div class="svc-card">
+      <div class="svc-name" style="color:#fde68a;">GraphHopper</div>
+      <div style="color:var(--muted);font-size:.8rem;margin:.2rem 0 .4rem;">Routing + Distanz-Matrix</div>
+      <div class="svc-url">:8989</div>
+    </div>
+    <div class="svc-card">
+      <div class="svc-name" style="color:#5eead4;">OpenRouteService</div>
+      <div style="color:var(--muted);font-size:.8rem;margin:.2rem 0 .4rem;">Isochrone (ORS v2)</div>
+      <div class="svc-url">:8082</div>
+    </div>
+    <div class="svc-card">
+      <div class="svc-name" style="color:#d8b4fe;">TileServer GL</div>
+      <div style="color:var(--muted);font-size:.8rem;margin:.2rem 0 .4rem;">Vektor-Kacheln (MapLibre)</div>
+      <div class="svc-url">:8083</div>
+    </div>
+    <div class="svc-card">
+      <div class="svc-name" style="color:#fb923c;">VROOM</div>
+      <div style="color:var(--muted);font-size:.8rem;margin:.2rem 0 .4rem;">Vehicle Routing (VRP)</div>
+      <div class="svc-url">:8084</div>
+    </div>
+  </div>
+</div>
+
+<!-- Konventionen -->
+<div id="conventions" class="card">
+  <div class="section-title">
+    <span class="prov-badge prov-system">📋 Konventionen</span>
+    <h2>API-Konventionen</h2>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;">
+    <div>
+      <div class="sub-label">Allgemein</div>
+      <div class="param-row"><span class="param-name">Format</span><span class="param-desc" style="color:var(--muted)">JSON — alle Requests und Responses</span></div>
+      <div class="param-row"><span class="param-name">Koordinaten</span><span class="param-desc" style="color:var(--muted)"><code>[lat, lon]</code> — Breitengrad immer zuerst</span></div>
+      <div class="param-row"><span class="param-name">Distanzen</span><span class="param-desc" style="color:var(--muted)">Meter (<code>_m</code>), Kilometer (<code>_km</code>)</span></div>
+      <div class="param-row"><span class="param-name">Zeiten</span><span class="param-desc" style="color:var(--muted)">Millisekunden (<code>time_ms</code>)</span></div>
+      <div class="param-row"><span class="param-name">CORS</span><span class="param-desc" style="color:var(--muted)"><code>Access-Control-Allow-Origin: *</code></span></div>
+    </div>
+    <div>
+      <div class="sub-label">Routing-Profile</div>
+      <div class="param-row"><span class="param-name"><code>car</code></span><span class="param-desc" style="color:var(--muted)">Pkw / Kraftfahrzeug</span></div>
+      <div class="param-row"><span class="param-name"><code>foot</code></span><span class="param-desc" style="color:var(--muted)">Zu Fuß</span></div>
+      <div class="param-row"><span class="param-name"><code>bike</code></span><span class="param-desc" style="color:var(--muted)">Fahrrad</span></div>
+      <div class="sub-label" style="margin-top:1rem;">Fehler-Response</div>
+      <div style="font-size:.82rem;color:var(--muted);">Alle Fehler: <code>{"error": "Beschreibung"}</code> mit passendem HTTP-Status.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ GEOCODING ═══ -->
+<div id="geocode" class="card" style="border-color:#1e40af;">
+  <div class="section-title">
+    <span class="prov-badge prov-geo">🔍 Geocoding</span>
+    <h2>Geocoding</h2>
   </div>
 
-  <div class="card">
-    <h2>Node Snapshot</h2>
-    <div class="kpis">
-      <div><strong>Name:</strong><br><code>{{ manifest.service.name }}</code></div>
-      <div><strong>Slug:</strong><br><code>{{ manifest.service.slug }}</code></div>
-      <div><strong>Version:</strong><br><code>{{ manifest.service.version }}</code></div>
-      <div><strong>Capabilities:</strong><br><code>{{ manifest.capabilities|length }}</code></div>
+  <div class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/geocode</div>
+        <div class="ep-desc">Volltext-Adresssuche via Nominatim — mit POI-Fallback bei Kategoriesuche</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Request-Body</div>
+      <div class="param-row"><span class="param-name">query<span class="req">*</span></span><span class="param-type">string</span><span class="param-desc">Suchbegriff — Adresse, Ort, POI-Name oder "apotheke köln"</span></div>
+      <div class="param-row"><span class="param-name">limit<span class="opt"> opt</span></span><span class="param-type">int 1–25</span><span class="param-desc">Maximale Trefferzahl (default: 10)</span></div>
+      <div class="sub-label">Response</div>
+      <div class="param-row"><span class="param-name">results</span><span class="param-type">array</span><span class="param-desc">Treffer mit <code>lat</code>, <code>lon</code>, <code>display_name</code>, <code>address</code></span></div>
+      <div class="param-row"><span class="param-name">source</span><span class="param-type">string</span><span class="param-desc"><code>nominatim</code> oder <code>poi-fallback</code></span></div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/geocode</span> \
+  -H <span class="str">'Content-Type: application/json'</span> \
+  -d '<span class="str">{"query": "Blütenstr. 62 47166 Duisburg", "limit": 5}</span>'
+
+<span class="cmt">// Response</span>
+{
+  <span class="key">"results"</span>: [{
+    <span class="key">"lat"</span>: <span class="str">"51.5136"</span>, <span class="key">"lon"</span>: <span class="str">"6.7921"</span>,
+    <span class="key">"display_name"</span>: <span class="str">"Blütenstraße 62, Duisburg, NRW, ..."</span>,
+    <span class="key">"address"</span>: { <span class="key">"road"</span>: <span class="str">"Blütenstraße"</span>, <span class="key">"postcode"</span>: <span class="str">"47166"</span>, <span class="key">"city"</span>: <span class="str">"Duisburg"</span> }
+  }],
+  <span class="key">"source"</span>: <span class="str">"nominatim"</span>
+}</div>
+      </div>
     </div>
   </div>
 
-  <div class="card">
-    <h2>Capabilities</h2>
-    <pre>{{ manifest.capabilities|tojson(indent=2) }}</pre>
+  <div id="suggest" class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/geocode/suggest</div>
+        <div class="ep-desc">Live-Autocomplete für Suchfelder — niedriges Limit, kurzer Timeout, ab 2 Zeichen</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Request-Body</div>
+      <div class="param-row"><span class="param-name">query<span class="req">*</span></span><span class="param-type">string ≥ 2</span><span class="param-desc">Teiladresse — bei &lt; 2 Zeichen gibt der Endpoint direkt <code>[]</code> zurück</span></div>
+      <div class="param-row"><span class="param-name">limit<span class="opt"> opt</span></span><span class="param-type">int 1–8</span><span class="param-desc">Maximale Trefferzahl (default: 5)</span></div>
+      <div style="background:rgba(59,130,246,.07);border:1px solid var(--blue-dim);border-radius:.4rem;padding:.6rem .875rem;font-size:.82rem;color:var(--muted);margin:.5rem 0;">
+        <strong style="color:var(--text);">Frontend-Pattern:</strong> Debounce 250–300 ms empfohlen.
+        Jeder Keystroke ohne Debounce trifft Nominatim — das kostet Performance.
+      </div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block"><span class="cmt">// Suchfeld mit Autocomplete (JS)</span>
+let _timer;
+searchInput.addEventListener(<span class="str">'input'</span>, () => {
+  clearTimeout(_timer);
+  _timer = setTimeout(async () => {
+    const res = await fetch(<span class="str">'BASE/api/geocode/suggest'</span>, {
+      method: <span class="str">'POST'</span>,
+      headers: {<span class="str">'Content-Type'</span>: <span class="str">'application/json'</span>},
+      body: JSON.stringify({query: searchInput.value, limit: <span class="num">5</span>})
+    });
+    const {results} = await res.json();
+    renderDropdown(results); <span class="cmt">// [{lat, lon, display_name, ...}]</span>
+  }, <span class="num">280</span>);
+});</div>
+      </div>
+    </div>
   </div>
 
-  <div class="card">
-    <h2>Routing Metadata</h2>
-    <pre>{{ manifest.routing|tojson(indent=2) }}</pre>
+  <div id="reverse" class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/reverse</div>
+        <div class="ep-desc">Reverse-Geocoding — Koordinaten → Adresse via Nominatim</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Request-Body</div>
+      <div class="param-row"><span class="param-name">lat<span class="req">*</span></span><span class="param-type">float</span><span class="param-desc">Breitengrad</span></div>
+      <div class="param-row"><span class="param-name">lon<span class="req">*</span></span><span class="param-type">float</span><span class="param-desc">Längengrad</span></div>
+      <div class="param-row"><span class="param-name">zoom<span class="opt"> opt</span></span><span class="param-type">int 0–18</span><span class="param-desc">Detailstufe — 18 = Hausnummer (default), 16 = Straße, 12 = Ort</span></div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/reverse</span> \
+  -H <span class="str">'Content-Type: application/json'</span> \
+  -d '<span class="str">{"lat": 51.5136, "lon": 6.7921, "zoom": 18}</span>'</div>
+      </div>
+    </div>
   </div>
 
-  <div class="card">
-    <h2>API Endpoints</h2>
-    <table>
-      <thead><tr><th>Methode</th><th>Pfad</th><th>Beschreibung</th></tr></thead>
-      <tbody>
-      {% for row in endpoints %}
-        <tr>
-          <td><code>{{ row.method }}</code></td>
-          <td><code>{{ row.path }}</code></td>
-          <td>{{ row.desc or '—' }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+  <div id="distance" class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/distance</div>
+        <div class="ep-desc">Haversine-Distanz + Kompass-Peilung zwischen zwei Punkten — kein externer Service nötig</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Request-Body</div>
+      <div class="param-row"><span class="param-name">from<span class="req">*</span></span><span class="param-type">[lat, lon]</span><span class="param-desc">Startpunkt als Array</span></div>
+      <div class="param-row"><span class="param-name">to<span class="req">*</span></span><span class="param-type">[lat, lon]</span><span class="param-desc">Zielpunkt als Array</span></div>
+      <div class="sub-label">Response</div>
+      <div class="param-row"><span class="param-name">distance_m</span><span class="param-type">int</span><span class="param-desc">Luftlinien-Distanz in Metern</span></div>
+      <div class="param-row"><span class="param-name">distance_km</span><span class="param-type">float</span><span class="param-desc">Luftlinien-Distanz in Kilometern</span></div>
+      <div class="param-row"><span class="param-name">bearing_deg</span><span class="param-type">float</span><span class="param-desc">Peilung in Grad (0° = Nord, 90° = Ost, 180° = Süd, 270° = West)</span></div>
+      <div class="param-row"><span class="param-name">bearing_compass</span><span class="param-type">string</span><span class="param-desc">N / NE / E / SE / S / SW / W / NW</span></div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/distance</span> \
+  -H <span class="str">'Content-Type: application/json'</span> \
+  -d '<span class="str">{"from": [51.5136, 7.4653], "to": [50.9413, 6.9583]}</span>'
+
+<span class="cmt">// Response</span>
+{
+  <span class="key">"distance_m"</span>: <span class="num">67482</span>,   <span class="key">"distance_km"</span>: <span class="num">67.482</span>,
+  <span class="key">"bearing_deg"</span>: <span class="num">218.4</span>,  <span class="key">"bearing_compass"</span>: <span class="str">"SW"</span>,
+  <span class="key">"from"</span>: {<span class="key">"lat"</span>: <span class="num">51.5136</span>, <span class="key">"lon"</span>: <span class="num">7.4653</span>},
+  <span class="key">"to"</span>:   {<span class="key">"lat"</span>: <span class="num">50.9413</span>, <span class="key">"lon"</span>: <span class="num">6.9583</span>}
+}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ROUTING ═══ -->
+<div id="route" class="card" style="border-color:#166534;">
+  <div class="section-title">
+    <span class="prov-badge prov-route">🚗 Routing</span>
+    <h2>Routenplanung</h2>
   </div>
 
-  <div class="card">
-    <h2>Beispiel-Requests</h2>
-    {% for ex in examples %}
-      <h3>{{ ex.title }}</h3>
-      <p><code>{{ ex.method }} {{ ex.path }}</code></p>
-      <pre>{{ ex.json|tojson(indent=2) }}</pre>
+  <div class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/route</div>
+        <div class="ep-desc">Multi-Stop-Routing via GraphHopper — Geometrie, Distanz, Zeit, Abbiegehinweise</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Request-Body</div>
+      <div class="param-row"><span class="param-name">profile<span class="req">*</span></span><span class="param-type">string</span><span class="param-desc"><code>car</code> | <code>foot</code> | <code>bike</code></span></div>
+      <div class="param-row"><span class="param-name">points<span class="req">*</span></span><span class="param-type">[[lat,lon]]</span><span class="param-desc">Mindestens zwei Wegpunkte — beliebig viele Zwischenstopps möglich</span></div>
+      <div class="sub-label">Response</div>
+      <div class="param-row"><span class="param-name">distance_m</span><span class="param-type">float</span><span class="param-desc">Streckenlänge in Metern</span></div>
+      <div class="param-row"><span class="param-name">time_ms</span><span class="param-type">int</span><span class="param-desc">Fahrzeit in Millisekunden</span></div>
+      <div class="param-row"><span class="param-name">geometry</span><span class="param-type">GeoJSON</span><span class="param-desc">LineString — direkt als MapLibre/Leaflet Source verwendbar</span></div>
+      <div class="param-row"><span class="param-name">instructions</span><span class="param-type">array</span><span class="param-desc">Abbiegehinweise mit <code>text</code>, <code>distance</code>, <code>sign</code></span></div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/route</span> \
+  -H <span class="str">'Content-Type: application/json'</span> \
+  -d '<span class="str">{"profile": "car", "points": [[51.5136, 7.4653], [50.9413, 6.9583]]}</span>'</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="isochrone" class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/isochrone</div>
+        <div class="ep-desc">Reichweiten-Isochrone via ORS — "Was erreiche ich in X Minuten?" als GeoJSON-Polygon</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Request-Body</div>
+      <div class="param-row"><span class="param-name">lat<span class="req">*</span></span><span class="param-type">float</span><span class="param-desc">Startpunkt Breitengrad</span></div>
+      <div class="param-row"><span class="param-name">lon<span class="req">*</span></span><span class="param-type">float</span><span class="param-desc">Startpunkt Längengrad</span></div>
+      <div class="param-row"><span class="param-name">profile<span class="opt"> opt</span></span><span class="param-type">string</span><span class="param-desc"><code>car</code> | <code>foot</code> | <code>bike</code> (default: car)</span></div>
+      <div class="param-row"><span class="param-name">range<span class="opt"> opt</span></span><span class="param-type">[int]</span><span class="param-desc">Reichweiten-Stufen — Sekunden bei <code>time</code>, Meter bei <code>distance</code> (default: [300] = 5 Min.)</span></div>
+      <div class="param-row"><span class="param-name">range_type<span class="opt"> opt</span></span><span class="param-type">string</span><span class="param-desc"><code>time</code> (default) | <code>distance</code> — max. 6 Stufen pro Aufruf</span></div>
+      <div style="background:rgba(20,184,166,.07);border:1px solid #0d9488;border-radius:.4rem;padding:.6rem .875rem;font-size:.82rem;color:var(--muted);margin:.5rem 0;">
+        Response: GeoJSON <code>FeatureCollection</code> direkt von ORS — jedes Feature enthält ein Polygon mit der Reichweite.
+        Mehrere Stufen in einem Aufruf möglich: <code>"range": [300, 600, 900]</code> = 5/10/15 Min.
+      </div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block"><span class="cmt"># 5 und 10 Minuten mit dem Auto</span>
+curl -X POST <span class="url">BASE/api/isochrone</span> \
+  -H <span class="str">'Content-Type: application/json'</span> \
+  -d '<span class="str">{"lat": 51.4818, "lon": 7.2162, "profile": "car", "range": [300, 600]}</span>'
+
+<span class="cmt"># 2 km Fußweg-Radius</span>
+curl -X POST <span class="url">BASE/api/isochrone</span> \
+  -H <span class="str">'Content-Type: application/json'</span> \
+  -d '<span class="str">{"lat": 51.4818, "lon": 7.2162, "profile": "foot",
+   "range": [2000], "range_type": "distance"}</span>'</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="matrix" class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/matrix</div>
+        <div class="ep-desc">Distanz-Matrix via GraphHopper — alle Distanzen/Zeiten zwischen n Ursprüngen und m Zielen</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Request-Body</div>
+      <div class="param-row"><span class="param-name">profile<span class="req">*</span></span><span class="param-type">string</span><span class="param-desc"><code>car</code> | <code>foot</code> | <code>bike</code></span></div>
+      <div class="param-row"><span class="param-name">origins<span class="req">*</span></span><span class="param-type">[[lat,lon]]</span><span class="param-desc">Startpunkte — max. 10</span></div>
+      <div class="param-row"><span class="param-name">destinations<span class="opt"> opt</span></span><span class="param-type">[[lat,lon]]</span><span class="param-desc">Zielpunkte (default: = origins → quadratische Matrix)</span></div>
+      <div style="background:rgba(239,68,68,.06);border:1px solid #450a0a;border-radius:.4rem;padding:.6rem .875rem;font-size:.82rem;color:#fca5a5;margin:.5rem 0;">
+        Limit: <strong>10 × 10 = 100 Kombinationen</strong> — bei Überschreitung HTTP 400.
+      </div>
+      <div class="sub-label">Response</div>
+      <div class="param-row"><span class="param-name">distances</span><span class="param-type">[[float]]</span><span class="param-desc">Matrix Distanzen in Metern — <code>distances[i][j]</code> = von Origin i nach Destination j</span></div>
+      <div class="param-row"><span class="param-name">times</span><span class="param-type">[[int]]</span><span class="param-desc">Matrix Zeiten in Millisekunden</span></div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/matrix</span> \
+  -H <span class="str">'Content-Type: application/json'</span> \
+  -d '<span class="str">{"profile": "car",
+   "origins":      [[51.5136, 7.4653], [50.9413, 6.9583]],
+   "destinations": [[51.2277, 6.7735]]}</span>'
+
+<span class="cmt">// Response — distances[i][j] in Metern</span>
+{
+  <span class="key">"distances"</span>: [[<span class="num">52341</span>], [<span class="num">41222</span>]],
+  <span class="key">"times"</span>:     [[<span class="num">2340000</span>], [<span class="num">1980000</span>]],
+  <span class="key">"origins_count"</span>: <span class="num">2</span>, <span class="key">"destinations_count"</span>: <span class="num">1</span>
+}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ POI ═══ -->
+<div id="poi-radius" class="card" style="border-color:#78350f;">
+  <div class="section-title">
+    <span class="prov-badge prov-poi">📍 POI</span>
+    <h2>Points of Interest</h2>
+  </div>
+
+  <div class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/poi/radius</div>
+        <div class="ep-desc">Umkreissuche — POIs innerhalb eines echten Haversine-Radius, sortiert nach Entfernung</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Request-Body</div>
+      <div class="param-row"><span class="param-name">category<span class="req">*</span></span><span class="param-type">string</span><span class="param-desc">POI-Kategorie-Key (siehe <a href="#poi-categories">Kategorien</a>)</span></div>
+      <div class="param-row"><span class="param-name">lat<span class="req">*</span></span><span class="param-type">float</span><span class="param-desc">Mittelpunkt Breitengrad</span></div>
+      <div class="param-row"><span class="param-name">lon<span class="req">*</span></span><span class="param-type">float</span><span class="param-desc">Mittelpunkt Längengrad</span></div>
+      <div class="param-row"><span class="param-name">radius_km<span class="opt"> opt</span></span><span class="param-type">float 0.1–25</span><span class="param-desc">Suchradius in Kilometern (default: 1.0)</span></div>
+      <div class="param-row"><span class="param-name">limit<span class="opt"> opt</span></span><span class="param-type">int 1–50</span><span class="param-desc">Max. Trefferzahl (default: 20)</span></div>
+      <div class="sub-label">Response — jedes Ergebnis enthält zusätzlich</div>
+      <div class="param-row"><span class="param-name">distance_m</span><span class="param-type">int</span><span class="param-desc">Haversine-Distanz zum Mittelpunkt in Metern</span></div>
+      <div class="param-row"><span class="param-name">name / tags</span><span class="param-type">string/obj</span><span class="param-desc">Name und OSM-Tags (Adresse, Öffnungszeiten, …)</span></div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/poi/radius</span> \
+  -H <span class="str">'Content-Type: application/json'</span> \
+  -d '<span class="str">{"category": "pharmacy", "lat": 51.4818, "lon": 7.2162, "radius_km": 2.0}</span>'
+
+<span class="cmt">// Response</span>
+{
+  <span class="key">"category"</span>: <span class="str">"pharmacy"</span>, <span class="key">"label"</span>: <span class="str">"Apotheke"</span>,
+  <span class="key">"center"</span>: {<span class="key">"lat"</span>: <span class="num">51.4818</span>, <span class="key">"lon"</span>: <span class="num">7.2162</span>},
+  <span class="key">"radius_km"</span>: <span class="num">2.0</span>, <span class="key">"count"</span>: <span class="num">7</span>,
+  <span class="key">"results"</span>: [
+    {<span class="key">"name"</span>: <span class="str">"Apotheke am Markt"</span>, <span class="key">"distance_m"</span>: <span class="num">423</span>,
+     <span class="key">"lat"</span>: <span class="num">51.4801</span>, <span class="key">"lon"</span>: <span class="num">7.2194</span>,
+     <span class="key">"tags"</span>: {<span class="key">"addr:street"</span>: <span class="str">"Marktplatz"</span>, ...}},
+    ...
+  ]
+}</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="poi-bbox" class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/poi</div>
+        <div class="ep-desc">POI-Suche in einer Bounding Box (Rechteck) via Overpass</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Request-Body</div>
+      <div class="param-row"><span class="param-name">category<span class="req">*</span></span><span class="param-type">string</span><span class="param-desc">POI-Kategorie-Key</span></div>
+      <div class="param-row"><span class="param-name">bbox<span class="req">*</span></span><span class="param-type">[s,w,n,e]</span><span class="param-desc">Bounding Box [south, west, north, east] — max. 4 Grad²</span></div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/poi</span> \
+  -H <span class="str">'Content-Type: application/json'</span> \
+  -d '<span class="str">{"category": "restaurant", "bbox": [51.45, 7.20, 51.52, 7.26]}</span>'</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="poi-categories" class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-get">GET</span>
+      <div>
+        <div class="ep-path">/api/poi/categories</div>
+        <div class="ep-desc">Alle verfügbaren POI-Kategorien mit Label</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin:.25rem 0 .75rem;">
+        {% set cats = [
+          ("pharmacy","Apotheke"),("restaurant","Restaurant"),("cafe","Café"),("bar","Bar"),("pub","Kneipe"),
+          ("fuel","Tankstelle"),("bank","Bank"),("atm","Geldautomat"),("hospital","Krankenhaus"),
+          ("doctors","Arzt"),("school","Schule"),("supermarket","Supermarkt"),("bakery","Bäckerei"),("convenience","Kiosk")
+        ] %}
+        {% for key, label in cats %}
+        <span style="background:var(--amber-dim);border:1px solid #78350f;border-radius:.3rem;padding:.15rem .5rem;font-size:.75rem;">
+          <code style="font-size:.75rem;">{{ key }}</code>
+          <span style="color:var(--muted);margin-left:.3rem;">{{ label }}</span>
+        </span>
+        {% endfor %}
+      </div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl <span class="url">BASE/api/poi/categories</span>
+
+[{<span class="key">"key"</span>:<span class="str">"pharmacy"</span>,<span class="key">"label"</span>:<span class="str">"Apotheke"</span>}, {<span class="key">"key"</span>:<span class="str">"restaurant"</span>,<span class="key">"label"</span>:<span class="str">"Restaurant"</span>}, ...]</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SYSTEM ═══ -->
+<div id="health" class="card">
+  <div class="section-title">
+    <span class="prov-badge prov-system">⚙ System</span>
+    <h2>Health &amp; Status</h2>
+  </div>
+
+  <div class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-get">GET</span>
+      <div>
+        <div class="ep-path">/health</div>
+        <div class="ep-desc">Schneller Healthcheck — HTTP-Status aller Docker-Services</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl <span class="url">BASE/health</span>
+
+{<span class="key">"status"</span>:<span class="str">"healthy"</span>, <span class="key">"healthy_services"</span>:<span class="num">6</span>, <span class="key">"total_services"</span>:<span class="num">6</span>,
+ <span class="key">"services"</span>:[{<span class="key">"key"</span>:<span class="str">"nominatim"</span>, <span class="key">"http_ok"</span>:<span class="num">true</span>, <span class="key">"docker"</span>:<span class="str">"running"</span>}, ...]}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-get">GET</span>
+      <div>
+        <div class="ep-path">/api/status</div>
+        <div class="ep-desc">Detaillierter Status inklusive Docker-State und Nominatim-Import-Phase</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl <span class="url">BASE/api/status</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="manifest" class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-get">GET</span>
+      <div>
+        <div class="ep-path">/api/service-manifest</div>
+        <div class="ep-desc">Vollständiges Node-Manifest — Capabilities, Endpunkt-URLs, Routing-Profile</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl <span class="url">BASE/api/service-manifest</span>
+
+{<span class="key">"service"</span>:{<span class="key">"name"</span>:<span class="str">"Joormann Media Jarvis OSM Lab"</span>, ...},
+ <span class="key">"capabilities"</span>:[<span class="str">"geo.geocode"</span>, <span class="str">"geo.geocode.suggest"</span>, <span class="str">"map.isochrone"</span>, ...],
+ <span class="key">"endpoints"</span>:{<span class="key">"geocode"</span>:<span class="str">"http://..."</span>, <span class="key">"isochrone"</span>:<span class="str">"http://..."</span>, ...}}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PORTAL ═══ -->
+<div id="portal" class="card" style="border-color:#6b21a8;">
+  <div class="section-title">
+    <span class="prov-badge prov-node">🔗 Portal</span>
+    <h2>Jarvis-Node Registrierung</h2>
+  </div>
+
+  <div class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-get">GET</span>
+      <div>
+        <div class="ep-path">/api/portal/status</div>
+        <div class="ep-desc">Registrierungsstatus am Family-Panel</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl <span class="url">BASE/api/portal/status</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/portal/register</div>
+        <div class="ep-desc">Node am Family-Panel registrieren (einfacher via <a href="/link">/link</a>)</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="sub-label">Request-Body</div>
+      <div class="param-row"><span class="param-name">portal_url<span class="req">*</span></span><span class="param-type">string</span><span class="param-desc">Base-URL des Family-Panels</span></div>
+      <div class="param-row"><span class="param-name">registration_token<span class="req">*</span></span><span class="param-type">string</span><span class="param-desc">Einmal-Token aus dem Family-Panel</span></div>
+      <div class="param-row"><span class="param-name">node_name<span class="opt"> opt</span></span><span class="param-type">string</span><span class="param-desc">Anzeigename im Panel</span></div>
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/portal/register</span> \
+  -H <span class="str">'Content-Type: application/json'</span> \
+  -d '<span class="str">{"portal_url": "http://family-panel:8000", "registration_token": "abc..."}</span>'</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/portal/sync</div>
+        <div class="ep-desc">Capabilities und alle Endpunkte neu ans Portal übermitteln</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/portal/sync</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Alle Endpunkte ═══ -->
+<div id="all-endpoints" class="card">
+  <div class="section-title">
+    <span class="prov-badge prov-system">📋 Übersicht</span>
+    <h2>Alle Endpunkte</h2>
+  </div>
+  <table>
+    <thead>
+      <tr><th style="width:60px">Methode</th><th>Pfad</th><th>Beschreibung</th></tr>
+    </thead>
+    <tbody>
+    {% for ep in endpoints %}
+      <tr>
+        <td><span class="m m-{{ ep.method|lower }}">{{ ep.method }}</span></td>
+        <td><code style="font-size:.8rem;">{{ ep.path }}</code></td>
+        <td style="color:var(--muted);">{{ ep.desc or '—' }}</td>
+      </tr>
     {% endfor %}
-  </div>
+    </tbody>
+  </table>
+</div>
+
+</main>
 </div>
 </body>
 </html>

@@ -8,6 +8,7 @@ import subprocess
 import time
 import uuid
 import hashlib
+import math
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -194,24 +195,35 @@ def _service_manifest() -> dict:
             "manifest": base + "/api/service-manifest",
             "capabilities": base + "/api/capabilities",
             "geocode": base + "/api/geocode",
+            "geocode_suggest": base + "/api/geocode/suggest",
             "reverse": base + "/api/reverse",
+            "distance": base + "/api/distance",
             "route": base + "/api/route",
+            "isochrone": base + "/api/isochrone",
+            "matrix": base + "/api/matrix",
             "poi": base + "/api/poi",
+            "poi_radius": base + "/api/poi/radius",
             "poi_categories": base + "/api/poi/categories",
             "route_ui": base + "/route",
             "map_ui": base + "/",
         },
         "capabilities": [
             "geo.geocode",
+            "geo.geocode.suggest",
             "geo.reverse_geocode",
             "geo.address_search",
             "geo.address_autocomplete",
+            "geo.distance",
+            "geo.bearing",
             "map.route_plan",
             "map.route_plan.multistop",
             "map.route_plan.profile_car",
             "map.route_plan.profile_foot",
             "map.route_plan.profile_bike",
+            "map.route_matrix",
+            "map.isochrone",
             "map.poi_search",
+            "map.poi_search.radius",
             "map.poi_categories",
             "map.tiles.vector",
             "jarvis.routing.osm_lab",
@@ -224,14 +236,24 @@ def _service_manifest() -> dict:
             "poi_categories": list(_POI_CATEGORIES.keys()) if "_POI_CATEGORIES" in globals() else [],
             "intents": [
                 "address_lookup",
+                "address_suggest",
                 "route_planning",
+                "route_matrix",
+                "isochrone",
                 "poi_lookup",
+                "poi_radius",
+                "distance",
             ],
             "entrypoints": {
-                "address_lookup": "/api/geocode",
-                "route_planning": "/api/route",
-                "poi_lookup": "/api/poi",
-                "reverse_lookup": "/api/reverse",
+                "address_lookup":  "/api/geocode",
+                "address_suggest": "/api/geocode/suggest",
+                "route_planning":  "/api/route",
+                "route_matrix":    "/api/matrix",
+                "isochrone":       "/api/isochrone",
+                "poi_lookup":      "/api/poi",
+                "poi_radius":      "/api/poi/radius",
+                "reverse_lookup":  "/api/reverse",
+                "distance":        "/api/distance",
             },
         },
         "integration": {
@@ -240,9 +262,14 @@ def _service_manifest() -> dict:
             "auth": "none",
             "notes": [
                 "POST /api/geocode mit {query, limit}",
+                "POST /api/geocode/suggest mit {query, limit} — Live-Autocomplete",
                 "POST /api/reverse mit {lat, lon, zoom?}",
+                "POST /api/distance mit {from:[lat,lon], to:[lat,lon]}",
                 "POST /api/route mit {profile, points:[[lat,lon], ...]}",
-                "POST /api/poi mit {category, bbox:[south,west,north,east]}",
+                "POST /api/isochrone mit {lat, lon, profile, range:[sek...]}",
+                "POST /api/matrix mit {profile, origins, destinations?}",
+                "POST /api/poi mit {category, bbox:[s,w,n,e]}",
+                "POST /api/poi/radius mit {category, lat, lon, radius_km}",
                 "GET /api liefert Endpoint-Katalog inkl. Kurzbeschreibung",
             ],
         },
@@ -252,22 +279,27 @@ def _service_manifest() -> dict:
 def _api_catalog_description(method: str, path: str) -> str:
     key = (method.upper().strip(), path.strip())
     descriptions: Dict[tuple[str, str], str] = {
-        ("GET", "/api"): "Endpoint-Katalog des OSM-Labs.",
-        ("GET", "/api/status"): "Live-Status aller OSM-Services.",
-        ("GET", "/api/service-manifest"): "Node-Selbstbeschreibung inkl. Routing-Infos.",
-        ("GET", "/api/capabilities"): "Kurzfassung von Capabilities + Endpoints.",
-        ("GET", "/api/setup/state"): "Setup-Zustand (Docker, Datenpfade, Dateien).",
-        ("GET", "/api/setup/browse-dirs"): "Verzeichnis-Browser fuer Setup.",
-        ("POST", "/api/setup/create-dir"): "Neues Verzeichnis im Setup anlegen.",
-        ("POST", "/api/setup/save-config"): "OSM-Pfade/URLs in config/osm.env speichern.",
-        ("POST", "/api/geocode"): "Addresssuche ueber Nominatim (+ POI-Fallback).",
-        ("POST", "/api/reverse"): "Reverse-Geocoding fuer lat/lon.",
-        ("POST", "/api/route"): "Routing ueber GraphHopper (car/foot/bike).",
-        ("POST", "/api/poi"): "POI-Suche ueber Overpass in einer BBox.",
-        ("GET", "/api/poi/categories"): "Verfuegbare POI-Kategorien.",
-        ("GET", "/api/portal/status"): "Status der Jarvis-Node-Registrierung.",
-        ("POST", "/api/portal/register"): "OSM-Lab am Family-Panel registrieren.",
-        ("POST", "/api/portal/sync"): "Capabilities/Endpoints ans Portal synchronisieren.",
+        ("GET",  "/api"):                      "Endpoint-Katalog des OSM-Labs.",
+        ("GET",  "/api/status"):               "Live-Status aller OSM-Services.",
+        ("GET",  "/api/service-manifest"):     "Node-Selbstbeschreibung inkl. Routing-Infos.",
+        ("GET",  "/api/capabilities"):         "Kurzfassung von Capabilities + Endpoints.",
+        ("GET",  "/api/setup/state"):          "Setup-Zustand (Docker, Datenpfade, Dateien).",
+        ("GET",  "/api/setup/browse-dirs"):    "Verzeichnis-Browser fuer Setup.",
+        ("POST", "/api/setup/create-dir"):     "Neues Verzeichnis im Setup anlegen.",
+        ("POST", "/api/setup/save-config"):    "OSM-Pfade/URLs in config/osm.env speichern.",
+        ("POST", "/api/geocode"):              "Adresssuche ueber Nominatim (+ POI-Fallback).",
+        ("POST", "/api/geocode/suggest"):      "Live-Autocomplete fuer Adressen (niedriges Limit, schnell).",
+        ("POST", "/api/reverse"):              "Reverse-Geocoding fuer lat/lon.",
+        ("POST", "/api/distance"):             "Haversine-Distanz und Peilung zwischen zwei Koordinaten.",
+        ("POST", "/api/route"):                "Routing ueber GraphHopper (car/foot/bike), multi-stop.",
+        ("POST", "/api/isochrone"):            "Reichweiten-Isochrone ueber OpenRouteService.",
+        ("POST", "/api/matrix"):               "Distanz-Matrix ueber GraphHopper (max. 10x10).",
+        ("POST", "/api/poi"):                  "POI-Suche ueber Overpass in einer BBox.",
+        ("POST", "/api/poi/radius"):           "POI-Umkreissuche: Mittelpunkt + Radius in km.",
+        ("GET",  "/api/poi/categories"):       "Verfuegbare POI-Kategorien.",
+        ("GET",  "/api/portal/status"):        "Status der Jarvis-Node-Registrierung.",
+        ("POST", "/api/portal/register"):      "OSM-Lab am Family-Panel registrieren.",
+        ("POST", "/api/portal/sync"):          "Capabilities/Endpoints ans Portal synchronisieren.",
     }
     return descriptions.get(key, "")
 
@@ -370,30 +402,35 @@ def _do_portal_sync(cfg: Optional[dict] = None) -> dict:
         {
             "section": "Geocoding",
             "endpoints": [
-                {"method": "POST", "path": "/api/geocode", "url": endpoint_map.get("geocode", ""), "description": "Adresse/Ort suchen"},
-                {"method": "POST", "path": "/api/reverse", "url": endpoint_map.get("reverse", ""), "description": "Koordinaten zu Adresse"},
+                {"method": "POST", "path": "/api/geocode",         "url": endpoint_map.get("geocode", ""),         "description": "Adresse/Ort suchen"},
+                {"method": "POST", "path": "/api/geocode/suggest", "url": endpoint_map.get("geocode_suggest", ""), "description": "Live-Autocomplete für Adressen"},
+                {"method": "POST", "path": "/api/reverse",         "url": endpoint_map.get("reverse", ""),         "description": "Koordinaten zu Adresse"},
+                {"method": "POST", "path": "/api/distance",        "url": endpoint_map.get("distance", ""),        "description": "Haversine-Distanz und Peilung"},
             ],
         },
         {
             "section": "Routing",
             "endpoints": [
-                {"method": "POST", "path": "/api/route", "url": endpoint_map.get("route", ""), "description": "Routenplanung (car/foot/bike)"},
+                {"method": "POST", "path": "/api/route",     "url": endpoint_map.get("route", ""),     "description": "Routenplanung (car/foot/bike)"},
+                {"method": "POST", "path": "/api/isochrone", "url": endpoint_map.get("isochrone", ""), "description": "Reichweiten-Isochrone"},
+                {"method": "POST", "path": "/api/matrix",    "url": endpoint_map.get("matrix", ""),    "description": "Distanz-Matrix"},
             ],
         },
         {
             "section": "POI",
             "endpoints": [
-                {"method": "POST", "path": "/api/poi", "url": endpoint_map.get("poi", ""), "description": "POI in BBox suchen"},
-                {"method": "GET", "path": "/api/poi/categories", "url": endpoint_map.get("poi_categories", ""), "description": "POI-Kategorien"},
+                {"method": "POST", "path": "/api/poi",            "url": endpoint_map.get("poi", ""),            "description": "POI in BBox suchen"},
+                {"method": "POST", "path": "/api/poi/radius",     "url": endpoint_map.get("poi_radius", ""),     "description": "POI-Umkreissuche (radius_km)"},
+                {"method": "GET",  "path": "/api/poi/categories", "url": endpoint_map.get("poi_categories", ""), "description": "POI-Kategorien"},
             ],
         },
         {
             "section": "Node",
             "endpoints": [
-                {"method": "GET", "path": "/health", "url": endpoint_map.get("health", ""), "description": "Healthcheck"},
-                {"method": "GET", "path": "/api/status", "url": endpoint_map.get("status", ""), "description": "Service-Status"},
+                {"method": "GET", "path": "/health",               "url": endpoint_map.get("health", ""),   "description": "Healthcheck"},
+                {"method": "GET", "path": "/api/status",           "url": endpoint_map.get("status", ""),   "description": "Service-Status"},
                 {"method": "GET", "path": "/api/service-manifest", "url": endpoint_map.get("manifest", ""), "description": "Manifest"},
-                {"method": "GET", "path": "/info", "url": endpoint_map.get("info", ""), "description": "API-Dokumentation"},
+                {"method": "GET", "path": "/info",                 "url": endpoint_map.get("info", ""),     "description": "API-Dokumentation"},
             ],
         },
     ]
@@ -850,22 +887,46 @@ def info():
             "json": {"query": "Kölner Dom", "limit": 5},
         },
         {
+            "title": "Live-Autocomplete",
+            "method": "POST",
+            "path": "/api/geocode/suggest",
+            "json": {"query": "Blütenstr. 62 Duis", "limit": 5},
+        },
+        {
             "title": "Koordinate in Adresse auflösen",
             "method": "POST",
             "path": "/api/reverse",
             "json": {"lat": 50.9413, "lon": 6.9583, "zoom": 18},
         },
         {
+            "title": "Distanz und Richtung",
+            "method": "POST",
+            "path": "/api/distance",
+            "json": {"from": [51.5136, 7.4653], "to": [50.9413, 6.9583]},
+        },
+        {
             "title": "Route mit mehreren Punkten",
             "method": "POST",
             "path": "/api/route",
-            "json": {
-                "profile": "car",
-                "points": [
-                    [50.9413, 6.9583],
-                    [51.2277, 6.7735],
-                ],
-            },
+            "json": {"profile": "car", "points": [[50.9413, 6.9583], [51.2277, 6.7735]]},
+        },
+        {
+            "title": "Isochrone — 10 Min. mit dem Auto",
+            "method": "POST",
+            "path": "/api/isochrone",
+            "json": {"lat": 51.4818, "lon": 7.2162, "profile": "car", "range": [600]},
+        },
+        {
+            "title": "Distanz-Matrix",
+            "method": "POST",
+            "path": "/api/matrix",
+            "json": {"profile": "car", "origins": [[51.5136, 7.4653], [50.9413, 6.9583]], "destinations": [[51.2277, 6.7735]]},
+        },
+        {
+            "title": "POI-Umkreissuche 2 km",
+            "method": "POST",
+            "path": "/api/poi/radius",
+            "json": {"category": "pharmacy", "lat": 51.4818, "lon": 7.2162, "radius_km": 2.0},
         },
         {
             "title": "POIs in Bounding Box suchen",
@@ -1508,6 +1569,33 @@ def _distance_score(lat1: float, lon1: float, lat2: float, lon2: float) -> float
     return ((lat1 - lat2) ** 2 + (lon1 - lon2) ** 2) ** 0.5
 
 
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    R = 6_371_000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(min(1.0, a)))
+
+
+def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dlambda = math.radians(lon2 - lon1)
+    x = math.sin(dlambda) * math.cos(phi2)
+    y = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlambda)
+    return (math.degrees(math.atan2(x, y)) + 360) % 360
+
+
+def _compass(deg: float) -> str:
+    return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][round(deg / 45) % 8]
+
+
+def _radius_to_bbox(lat: float, lon: float, radius_km: float) -> list[float]:
+    deg_lat = radius_km / 111.32
+    deg_lon = radius_km / (111.32 * math.cos(math.radians(lat))) if lat != 90.0 else deg_lat
+    return [lat - deg_lat, lon - deg_lon, lat + deg_lat, lon + deg_lon]
+
+
 def _query_poi(category: str, bbox: list[float]) -> tuple[str, list[dict]]:
     s, w, n, e = bbox
     key, value, label = _POI_CATEGORIES[category]
@@ -1606,6 +1694,188 @@ def api_reverse():
         return jsonify({"error": "Nominatim nicht erreichbar"}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Neue Endpunkte: Suggest, Umkreis, Distanz, Isochrone, Matrix
+# ---------------------------------------------------------------------------
+
+@app.route("/api/geocode/suggest", methods=["POST"])
+def api_geocode_suggest():
+    """Adress-Autocomplete über Nominatim — niedriges Limit, kurzer Timeout.
+       Erwartet: { "query": "...", "limit": 5 }"""
+    data  = request.get_json(force=True, silent=True) or {}
+    query = (data.get("query") or "").strip()
+    if len(query) < 2:
+        return jsonify({"results": [], "source": "nominatim", "query": query})
+    limit = max(1, min(8, int(data.get("limit", 5))))
+    try:
+        results = _nominatim_search(query, limit=limit)
+    except Exception:
+        results = []
+    return jsonify({"results": results, "source": "nominatim", "query": query})
+
+
+@app.route("/api/poi/radius", methods=["POST"])
+def api_poi_radius():
+    """POI-Umkreissuche: Mittelpunkt + Radius in km, sortiert nach Distanz.
+       Erwartet: { "category": "pharmacy", "lat": 51.5, "lon": 7.0, "radius_km": 2.0, "limit": 20 }"""
+    data     = request.get_json(force=True, silent=True) or {}
+    category = (data.get("category") or "").strip()
+    if category not in _POI_CATEGORIES:
+        return jsonify({"error": f"Unbekannte Kategorie. Verfügbar: {list(_POI_CATEGORIES.keys())}"}), 400
+    try:
+        lat = float(data["lat"])
+        lon = float(data["lon"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "lat und lon als Dezimalzahl erforderlich"}), 400
+    radius_km = max(0.1, min(25.0, float(data.get("radius_km", 1.0))))
+    limit     = max(1, min(50, int(data.get("limit", 20))))
+
+    bbox = _radius_to_bbox(lat, lon, radius_km)
+    try:
+        label, pois = _query_poi(category, bbox)
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "Overpass nicht erreichbar"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    results = []
+    for poi in pois:
+        dist_m = _haversine_m(lat, lon, float(poi["lat"]), float(poi["lon"]))
+        if dist_m <= radius_km * 1000:
+            poi["distance_m"] = round(dist_m)
+            results.append(poi)
+    results.sort(key=lambda p: p["distance_m"])
+    return jsonify({
+        "category":  category,
+        "label":     label,
+        "center":    {"lat": lat, "lon": lon},
+        "radius_km": radius_km,
+        "results":   results[:limit],
+        "count":     len(results[:limit]),
+    })
+
+
+@app.route("/api/distance", methods=["POST"])
+def api_distance():
+    """Haversine-Distanz und Peilung zwischen zwei Koordinaten (kein externer Service).
+       Erwartet: { "from": [lat, lon], "to": [lat, lon] }"""
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        frm = data["from"]
+        to  = data["to"]
+        lat1, lon1 = float(frm[0]), float(frm[1])
+        lat2, lon2 = float(to[0]),  float(to[1])
+    except (KeyError, TypeError, ValueError, IndexError):
+        return jsonify({"error": "from und to als [lat, lon] erforderlich"}), 400
+
+    dist_m  = _haversine_m(lat1, lon1, lat2, lon2)
+    bearing = _bearing_deg(lat1, lon1, lat2, lon2)
+    return jsonify({
+        "distance_m":      round(dist_m),
+        "distance_km":     round(dist_m / 1000, 3),
+        "bearing_deg":     round(bearing, 1),
+        "bearing_compass": _compass(bearing),
+        "from":            {"lat": lat1, "lon": lon1},
+        "to":              {"lat": lat2, "lon": lon2},
+    })
+
+
+@app.route("/api/isochrone", methods=["POST"])
+def api_isochrone():
+    """Reichweiten-Analyse (Isochrone) über OpenRouteService.
+       Erwartet: { "lat": 51.5, "lon": 7.0, "profile": "car", "range": [300, 600], "range_type": "time" }
+       range_type: "time" (Sekunden, default) oder "distance" (Meter)"""
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        lat = float(data["lat"])
+        lon = float(data["lon"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "lat und lon als Dezimalzahl erforderlich"}), 400
+
+    _profile_map = {"car": "driving-car", "foot": "foot-walking", "bike": "cycling-regular"}
+    profile_key  = (data.get("profile") or "car").lower()
+    ors_profile  = _profile_map.get(profile_key)
+    if not ors_profile:
+        return jsonify({"error": "Profil muss car, foot oder bike sein"}), 400
+
+    range_raw  = data.get("range") or [300]
+    range_vals = ([range_raw] if isinstance(range_raw, (int, float)) else list(range_raw))[:6]
+    range_vals = [int(r) for r in range_vals]
+    range_type = str(data.get("range_type") or "time").lower()
+    if range_type not in ("time", "distance"):
+        return jsonify({"error": "range_type muss 'time' oder 'distance' sein"}), 400
+
+    payload = {
+        "locations":   [[lon, lat]],
+        "range":       range_vals,
+        "range_type":  range_type,
+        "smoothing":   0.0,
+    }
+    try:
+        r = requests.post(
+            f"{ORS_URL}/ors/v2/isochrones/{ors_profile}",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=20,
+        )
+        if r.status_code >= 400:
+            return jsonify({"error": f"ORS {r.status_code}: {r.text[:300]}"}), 502
+        return jsonify(r.json())
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "OpenRouteService nicht erreichbar"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/matrix", methods=["POST"])
+def api_matrix():
+    """Distanz-Matrix über GraphHopper (max. 10 × 10 = 100 Kombinationen).
+       Erwartet: { "profile": "car", "origins": [[lat,lon],...], "destinations": [[lat,lon],...] }
+       destinations ist optional — ohne Angabe wird origins als destinations verwendet."""
+    data         = request.get_json(force=True, silent=True) or {}
+    profile      = (data.get("profile") or "car").lower()
+    if profile not in ("car", "foot", "bike"):
+        return jsonify({"error": "Profil muss car, foot oder bike sein"}), 400
+
+    origins      = data.get("origins") or []
+    destinations = data.get("destinations") or origins
+    if not origins:
+        return jsonify({"error": "Mindestens ein Ursprungspunkt erforderlich"}), 400
+    if len(origins) * len(destinations) > 100:
+        return jsonify({"error": "Matrix zu groß — max. 10 × 10 Kombinationen"}), 400
+
+    def _pt(p: Any) -> str:
+        return f"{float(p[0])},{float(p[1])}"
+
+    try:
+        params: list[tuple[str, str]] = [
+            ("profile",    profile),
+            ("out_array",  "distances"),
+            ("out_array",  "times"),
+        ]
+        for p in origins:
+            params.append(("from_point", _pt(p)))
+        for p in destinations:
+            params.append(("to_point", _pt(p)))
+
+        r = requests.get(GRAPHHOPPER_URL + "/matrix", params=params, timeout=20)
+        if r.status_code >= 400:
+            return jsonify({"error": f"GraphHopper {r.status_code}: {r.text[:200]}"}), 502
+        gh = r.json()
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "GraphHopper nicht erreichbar"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({
+        "profile":             profile,
+        "distances":           gh.get("distances"),
+        "times":               gh.get("times"),
+        "origins_count":       len(origins),
+        "destinations_count":  len(destinations),
+    })
 
 
 # ---------------------------------------------------------------------------
