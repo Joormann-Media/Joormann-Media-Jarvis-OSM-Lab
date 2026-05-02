@@ -371,6 +371,52 @@ def _public_base_url() -> str:
     return PUBLIC_BASE_URL or request.url_root.rstrip("/")
 
 
+def _external_service_base(raw_url: str) -> str:
+    value = (raw_url or "").strip().rstrip("/")
+    if not value:
+        return ""
+    try:
+        from urllib.parse import urlsplit, urlunsplit
+
+        parsed = urlsplit(value)
+        if parsed.hostname in {"localhost", "127.0.0.1", "0.0.0.0"}:
+            req = urlsplit(_public_base_url())
+            netloc = req.hostname or parsed.hostname or ""
+            if parsed.port:
+                netloc = f"{netloc}:{parsed.port}"
+            value = urlunsplit((parsed.scheme or req.scheme or "http", netloc, "", "", ""))
+    except Exception:
+        pass
+    return value.rstrip("/")
+
+
+def _map_context_payload(lat: float | None = None, lon: float | None = None, zoom: int | None = None) -> dict[str, Any]:
+    base = _public_base_url()
+    tileserver_base = _external_service_base(TILESERVER_URL)
+    style_url = f"{tileserver_base}/styles/osm-bright/style.json" if tileserver_base else ""
+    center = {"lat": lat if lat is not None else 51.4344, "lon": lon if lon is not None else 6.7623}
+    return {
+        "ok": True,
+        "service": "jarvis-osm-lab",
+        "provider": "osm_stack",
+        "center": center,
+        "zoom": zoom if zoom is not None else 10,
+        "map": {
+            "type": "maplibre",
+            "style_url": style_url,
+            "tileserver_base_url": tileserver_base,
+            "embed_url": base + "/",
+            "route_ui_url": base + "/route",
+            "source": "osm_lab_manifest",
+        },
+        "meta": {
+            "read_only": True,
+            "requires_confirmation": False,
+            "permission_key": "geo.read",
+        },
+    }
+
+
 def _geo_mcp_action_defs() -> list[dict[str, Any]]:
     location_schema = {
         "type": "object",
@@ -391,6 +437,7 @@ def _geo_mcp_action_defs() -> list[dict[str, Any]]:
         ("geo.resolve_location", "Ort normalisiert fuer andere Labs aufloesen.", "/api/geo/resolve-location", "geo.resolve", location_schema, ["geo", "location", "resolve", "read"]),
         ("geo.health", "Geo-Bridge Health-Status lesen.", "/api/geo/health", "geo.health", {}, ["geo", "health", "read"]),
         ("geo.capabilities", "Geo-Capabilities und MCP-Vertrag lesen.", "/api/geo/capabilities", "geo.health", {}, ["geo", "capabilities", "read"]),
+        ("map.context", "Karten-Kontext fuer Labs und Panels lesen.", "/api/map/context", "geo.read", reverse_schema, ["map", "osm", "context", "read"]),
     ]
     actions: list[dict[str, Any]] = []
     for name, description, endpoint, permission, input_schema, tags in rows:
@@ -427,9 +474,15 @@ def _geo_mcp_action_defs() -> list[dict[str, Any]]:
 
 def _load_or_seed_mcp_actions() -> list[dict[str, Any]]:
     actions = mcp_registry.load_mcp_actions()
+    defaults = {str(a.get("id")): a for a in _geo_mcp_action_defs()}
     if not actions:
-        actions = _geo_mcp_action_defs()
-        mcp_registry.save_mcp_actions(actions)
+        actions = list(defaults.values())
+    else:
+        by_id = {str(a.get("id")): dict(a) for a in actions if isinstance(a, dict)}
+        for action_id, action in defaults.items():
+            if action_id not in by_id:
+                by_id[action_id] = action
+        actions = list(by_id.values())
     normalized = mcp_registry.normalize_actions(actions)
     if normalized != actions:
         mcp_registry.save_mcp_actions(normalized)
@@ -450,6 +503,7 @@ def _service_manifest() -> dict:
         "capabilities_url": base + "/api/capabilities",
         "mcp_actions_url": base + "/api/mcp/actions",
         "actions": actions,
+        "map_context": _map_context_payload(),
         "panel_bridge_enabled": PANEL_BRIDGE_ENABLED,
         "service_meta": {
             "name": "Joormann Media Jarvis OSM Lab",
@@ -478,6 +532,7 @@ def _service_manifest() -> dict:
             "capabilities": base + "/api/capabilities",
             "mcp_actions": base + "/api/mcp/actions",
             "mcp_settings": base + "/api/mcp/settings",
+            "map_context": base + "/api/map/context",
             "geocode": base + "/api/geocode",
             "geocode_suggest": base + "/api/geocode/suggest",
             "reverse": base + "/api/reverse",
@@ -504,6 +559,7 @@ def _service_manifest() -> dict:
             "geo.reverse",
             "geo.health",
             "geo.capabilities",
+            "map.context",
             "geo.address_search",
             "geo.address_autocomplete",
             "geo.distance",
@@ -519,6 +575,7 @@ def _service_manifest() -> dict:
             "map.poi_search.radius",
             "map.poi_categories",
             "map.tiles.vector",
+            "map.context",
             "jarvis.routing.osm_lab",
             "jarvis.routing.address_lookup",
             "jarvis.routing.route_planning",
@@ -586,6 +643,7 @@ def _service_manifest() -> dict:
             },
             "permissions": ["geo.read", "geo.resolve", "geo.health"],
             "mcp_actions": actions,
+            "map_context": _map_context_payload(),
         },
     }
 
@@ -603,6 +661,7 @@ def _panel_manifest() -> dict:
         "capabilities_url": manifest.get("capabilities_url"),
         "mcp_actions_url": manifest.get("mcp_actions_url"),
         "actions": manifest.get("actions") or [],
+        "map_context": manifest.get("map_context") or {},
         "capabilities": manifest.get("capabilities") or [],
         "endpoints": manifest.get("endpoints") or {},
         "panel_bridge_enabled": PANEL_BRIDGE_ENABLED,
@@ -1486,6 +1545,18 @@ def api_mcp_export():
     return jsonify(ok=True, **export)
 
 
+@app.get("/api/map/context")
+def api_map_context():
+    lat, lon, error = _geo_validate_lat_lon(request.args.get("lat", "51.4344"), request.args.get("lon", "6.7623"))
+    if error:
+        return _geo_error("invalid_coordinates", error, 400)
+    try:
+        zoom = max(0, min(22, int(request.args.get("zoom", "10") or "10")))
+    except ValueError:
+        return _geo_error("invalid_zoom", "zoom muss eine Zahl zwischen 0 und 22 sein.", 400)
+    return jsonify(_map_context_payload(lat, lon, zoom))
+
+
 @app.route("/api/mcp/execute", methods=["GET", "POST"])
 def api_mcp_execute():
     params = request.get_json(silent=True) if request.method == "POST" else request.args.to_dict()
@@ -1509,6 +1580,8 @@ def api_mcp_execute():
             return api_geo_health()
         if action_name == "geo.capabilities":
             return api_geo_capabilities()
+        if action_name == "map.context":
+            return api_map_context()
     return jsonify(ok=False, error="action_not_executable"), 400
 
 
@@ -1657,7 +1730,9 @@ def api_geo_capabilities():
             "resolve_location": "/api/geo/resolve-location?q=...",
             "health": "/api/geo/health",
             "capabilities": "/api/geo/capabilities",
+            "map_context": "/api/map/context?lat=...&lon=...",
         },
+        "map_context": _map_context_payload(),
         "response_schema": {
             "ok": True,
             "query": "Duisburg",

@@ -22,6 +22,7 @@ Settings koennen ueber `POST /api/mcp/settings` gespeichert werden. Damit lassen
 | `geo.resolve_location` | `GET /api/geo/resolve-location` | `geo.resolve` |
 | `geo.health` | `GET /api/geo/health` | `geo.health` |
 | `geo.capabilities` | `GET /api/geo/capabilities` | `geo.health` |
+| `map.context` | `GET /api/map/context` | `geo.read` |
 
 Alle Actions melden `read_only=true` und `requires_confirmation=false`.
 
@@ -71,6 +72,7 @@ Alle Actions melden `read_only=true` und `requires_confirmation=false`.
 curl "$BASE/api/manifest"
 curl "$BASE/api/capabilities"
 curl "$BASE/api/mcp/actions"
+curl "$BASE/api/mcp/execute?action=map.context&lat=51.4344&lon=6.7623"
 curl "$BASE/api/mcp/execute?action=geo.geocode&q=Duisburg"
 ./scripts/check_mcp_contract.sh "$BASE"
 ```
