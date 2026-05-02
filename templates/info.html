@@ -839,6 +839,22 @@ async function applyUpdate() {
       </div>
     </div>
   </div>
+
+  <div class="ep-block">
+    <div class="ep-header" onclick="toggleEp(this)">
+      <span class="m m-post">POST</span>
+      <div>
+        <div class="ep-path">/api/portal/heartbeat</div>
+        <div class="ep-desc">Manuellen Heartbeat ans Family-Panel senden (automatisch alle 300 s)</div>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="code-wrap">
+        <button class="copy-btn" onclick="copyCode(this)">Kopieren</button>
+        <div class="code-block">curl -X POST <span class="url">BASE/api/portal/heartbeat</span></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ Alle Endpunkte ═══ -->

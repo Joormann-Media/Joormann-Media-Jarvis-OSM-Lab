@@ -7,8 +7,10 @@ import platform
 import subprocess
 import time
 import uuid
+import uuid as _uuid_mod
 import hashlib
 import math
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -48,6 +50,13 @@ GEOFABRIK_PBF_URL = os.environ.get("GEOFABRIK_PBF_URL",
 MBTILES_URL       = os.environ.get("MBTILES_URL", "")
 
 TIMEOUT = 3
+GEO_DEFAULT_PROVIDER = os.environ.get("GEO_DEFAULT_PROVIDER", "nominatim").strip().lower() or "nominatim"
+GEO_NOMINATIM_BASE_URL = os.environ.get("GEO_NOMINATIM_BASE_URL", NOMINATIM_URL).rstrip("/")
+GEO_CACHE_TTL_SECONDS = max(0, int(os.environ.get("GEO_CACHE_TTL_SECONDS", "86400") or "86400"))
+GEO_TIMEOUT_SECONDS = max(1, int(os.environ.get("GEO_TIMEOUT_SECONDS", "5") or "5"))
+GEO_CACHE_PATH = Path(os.environ.get("GEO_CACHE_PATH", str(RUNTIME_DIR / "cache" / "geo-cache.json")))
+GEO_USER_AGENT = os.environ.get("GEO_USER_AGENT", "Joormann-OSM-Lab/1.0").strip() or "Joormann-OSM-Lab/1.0"
+_GEO_CACHE_LOCK = threading.RLock()
 
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -101,6 +110,185 @@ def _get_json_with_retry(url: str, *, params: dict | None = None,
     if last_error:
         raise last_error
     return last_status, {}
+
+
+def _geo_cache_load() -> dict:
+    if not GEO_CACHE_PATH.exists():
+        return {}
+    try:
+        raw = json.loads(GEO_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _geo_cache_save(cache: dict) -> None:
+    GEO_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    GEO_CACHE_PATH.write_text(
+        json.dumps(cache, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _geo_cache_key(kind: str, value: str) -> str:
+    normalized = re.sub(r"\s+", " ", value.strip().lower())
+    raw = f"{kind}:{normalized}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _geo_cache_get(kind: str, value: str) -> dict | None:
+    if GEO_CACHE_TTL_SECONDS <= 0:
+        return None
+    key = _geo_cache_key(kind, value)
+    with _GEO_CACHE_LOCK:
+        cache = _geo_cache_load()
+        item = cache.get(key)
+        if not isinstance(item, dict):
+            return None
+        created_at = float(item.get("created_at") or 0)
+        if time.time() - created_at > GEO_CACHE_TTL_SECONDS:
+            cache.pop(key, None)
+            _geo_cache_save(cache)
+            return None
+        payload = item.get("payload")
+        return payload if isinstance(payload, dict) else None
+
+
+def _geo_cache_set(kind: str, value: str, payload: dict) -> None:
+    if GEO_CACHE_TTL_SECONDS <= 0:
+        return
+    key = _geo_cache_key(kind, value)
+    with _GEO_CACHE_LOCK:
+        cache = _geo_cache_load()
+        cache[key] = {"created_at": time.time(), "payload": payload}
+        _geo_cache_save(cache)
+
+
+def _geo_address_value(address: dict, *keys: str) -> str:
+    for key in keys:
+        value = address.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _geo_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _geo_location_from_nominatim(item: dict) -> dict:
+    address = item.get("address") if isinstance(item.get("address"), dict) else {}
+    city = _geo_address_value(address, "city", "town", "village", "municipality", "county")
+    district = _geo_address_value(
+        address,
+        "city_district",
+        "district",
+        "suburb",
+        "quarter",
+        "neighbourhood",
+        "borough",
+    )
+    country = _geo_address_value(address, "country")
+    postcode = _geo_address_value(address, "postcode")
+    lat = _geo_float(item.get("lat"))
+    lon = _geo_float(item.get("lon"))
+    label = str(item.get("display_name") or "").strip()
+    if not label:
+        label = ", ".join(part for part in (district, city, country) if part)
+    return {
+        "label": label,
+        "lat": lat,
+        "lon": lon,
+        "city": city,
+        "district": district,
+        "country": country,
+        "postcode": postcode,
+    }
+
+
+def _geo_error(code: str, message: str, status: int, **extra: Any):
+    payload = {"ok": False, "error": code, "message": message}
+    payload.update(extra)
+    return jsonify(payload), status
+
+
+def _geo_validate_lat_lon(lat_raw: str | None, lon_raw: str | None) -> tuple[float | None, float | None, str | None]:
+    try:
+        lat = float(lat_raw if lat_raw is not None else "")
+        lon = float(lon_raw if lon_raw is not None else "")
+    except (TypeError, ValueError):
+        return None, None, "lat und lon als Dezimalzahl erforderlich"
+    if not (-90 <= lat <= 90):
+        return None, None, "lat muss zwischen -90 und 90 liegen"
+    if not (-180 <= lon <= 180):
+        return None, None, "lon muss zwischen -180 und 180 liegen"
+    return lat, lon, None
+
+
+def _geo_provider_base_url() -> str:
+    if GEO_DEFAULT_PROVIDER != "nominatim":
+        return ""
+    return GEO_NOMINATIM_BASE_URL
+
+
+def _geo_nominatim_search(query: str, limit: int = 1) -> list[dict]:
+    base_url = _geo_provider_base_url()
+    if not base_url:
+        raise ValueError(f"Unsupported GEO_DEFAULT_PROVIDER: {GEO_DEFAULT_PROVIDER}")
+    params = {
+        "q": query,
+        "format": "jsonv2",
+        "addressdetails": 1,
+        "limit": limit,
+        "accept-language": "de",
+    }
+    status, payload = _get_json_with_retry(
+        base_url + "/search",
+        params=params,
+        timeout=GEO_TIMEOUT_SECONDS,
+        headers={"User-Agent": GEO_USER_AGENT},
+        attempts=2,
+    )
+    if status >= 400:
+        raise requests.HTTPError(f"Nominatim {status}")
+    return payload if isinstance(payload, list) else []
+
+
+def _geo_nominatim_reverse(lat: float, lon: float, zoom: int = 18) -> dict:
+    base_url = _geo_provider_base_url()
+    if not base_url:
+        raise ValueError(f"Unsupported GEO_DEFAULT_PROVIDER: {GEO_DEFAULT_PROVIDER}")
+    params = {
+        "lat": lat,
+        "lon": lon,
+        "format": "jsonv2",
+        "addressdetails": 1,
+        "zoom": zoom,
+        "accept-language": "de",
+    }
+    status, payload = _get_json_with_retry(
+        base_url + "/reverse",
+        params=params,
+        timeout=GEO_TIMEOUT_SECONDS,
+        headers={"User-Agent": GEO_USER_AGENT},
+        attempts=2,
+    )
+    if status >= 400:
+        raise requests.HTTPError(f"Nominatim {status}")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _geo_response(query: str, location: dict, source: str, cached: bool) -> dict:
+    return {
+        "ok": True,
+        "query": query,
+        "location": location,
+        "source": source,
+        "cached": cached,
+    }
 
 
 def _post_json_with_retry(url: str, *, data: dict | None = None,
@@ -197,6 +385,11 @@ def _service_manifest() -> dict:
             "geocode": base + "/api/geocode",
             "geocode_suggest": base + "/api/geocode/suggest",
             "reverse": base + "/api/reverse",
+            "geo_geocode": base + "/api/geo/geocode",
+            "geo_reverse": base + "/api/geo/reverse",
+            "geo_resolve_location": base + "/api/geo/resolve-location",
+            "geo_health": base + "/api/geo/health",
+            "geo_capabilities": base + "/api/geo/capabilities",
             "distance": base + "/api/distance",
             "route": base + "/api/route",
             "isochrone": base + "/api/isochrone",
@@ -209,8 +402,12 @@ def _service_manifest() -> dict:
         },
         "capabilities": [
             "geo.geocode",
+            "geo.resolve_location",
             "geo.geocode.suggest",
             "geo.reverse_geocode",
+            "geo.reverse",
+            "geo.health",
+            "geo.capabilities",
             "geo.address_search",
             "geo.address_autocomplete",
             "geo.distance",
@@ -246,6 +443,10 @@ def _service_manifest() -> dict:
             ],
             "entrypoints": {
                 "address_lookup":  "/api/geocode",
+                "geo_geocode":     "/api/geo/geocode",
+                "geo_reverse":     "/api/geo/reverse",
+                "geo_resolve":     "/api/geo/resolve-location",
+                "geo_health":      "/api/geo/health",
                 "address_suggest": "/api/geocode/suggest",
                 "route_planning":  "/api/route",
                 "route_matrix":    "/api/matrix",
@@ -271,6 +472,28 @@ def _service_manifest() -> dict:
                 "POST /api/poi mit {category, bbox:[s,w,n,e]}",
                 "POST /api/poi/radius mit {category, lat, lon, radius_km}",
                 "GET /api liefert Endpoint-Katalog inkl. Kurzbeschreibung",
+                "GET /api/geo/geocode?q=... liefert Weather-Lab-kompatible Geo-Normalform",
+                "GET /api/geo/reverse?lat=...&lon=... liefert Weather-Lab-kompatible Geo-Normalform",
+            ],
+        },
+        "geo_bridge": {
+            "provider": GEO_DEFAULT_PROVIDER,
+            "nominatim_base_url_configured": bool(GEO_NOMINATIM_BASE_URL),
+            "cache_ttl_seconds": GEO_CACHE_TTL_SECONDS,
+            "timeout_seconds": GEO_TIMEOUT_SECONDS,
+            "endpoints": {
+                "geocode": "/api/geo/geocode?q=...",
+                "reverse": "/api/geo/reverse?lat=...&lon=...",
+                "resolve_location": "/api/geo/resolve-location?q=...",
+                "health": "/api/geo/health",
+                "capabilities": "/api/geo/capabilities",
+            },
+            "permissions": ["geo.read", "geo.resolve", "geo.health"],
+            "mcp_actions": [
+                {"name": "geo.geocode", "permission": "geo.resolve", "read_only": True},
+                {"name": "geo.reverse", "permission": "geo.read", "read_only": True},
+                {"name": "geo.resolve_location", "permission": "geo.resolve", "read_only": True},
+                {"name": "geo.health", "permission": "geo.health", "read_only": True},
             ],
         },
     }
@@ -290,6 +513,11 @@ def _api_catalog_description(method: str, path: str) -> str:
         ("POST", "/api/geocode"):              "Adresssuche ueber Nominatim (+ POI-Fallback).",
         ("POST", "/api/geocode/suggest"):      "Live-Autocomplete fuer Adressen (niedriges Limit, schnell).",
         ("POST", "/api/reverse"):              "Reverse-Geocoding fuer lat/lon.",
+        ("GET",  "/api/geo/geocode"):          "Weather-Lab Geo-Bridge: Ort/Adresse zu lat/lon.",
+        ("GET",  "/api/geo/reverse"):          "Weather-Lab Geo-Bridge: lat/lon zu Adresse/Ort.",
+        ("GET",  "/api/geo/resolve-location"): "Weather-Lab Geo-Bridge: Ort/Adresse normalisiert aufloesen.",
+        ("GET",  "/api/geo/health"):           "Healthcheck der Geo-Bridge inkl. Provider und Cache.",
+        ("GET",  "/api/geo/capabilities"):     "Capabilities der Geo-Bridge fuer Integrationen.",
         ("POST", "/api/distance"):             "Haversine-Distanz und Peilung zwischen zwei Koordinaten.",
         ("POST", "/api/route"):                "Routing ueber GraphHopper (car/foot/bike), multi-stop.",
         ("POST", "/api/isochrone"):            "Reichweiten-Isochrone ueber OpenRouteService.",
@@ -300,6 +528,7 @@ def _api_catalog_description(method: str, path: str) -> str:
         ("GET",  "/api/portal/status"):        "Status der Jarvis-Node-Registrierung.",
         ("POST", "/api/portal/register"):      "OSM-Lab am Family-Panel registrieren.",
         ("POST", "/api/portal/sync"):          "Capabilities/Endpoints ans Portal synchronisieren.",
+        ("POST", "/api/portal/heartbeat"):     "Manuellen Heartbeat ans Family-Panel senden.",
         ("GET",  "/api/update/status"):        "Update-Status pruefen (git fetch + behind-Pruefung).",
         ("POST", "/api/update/apply"):         "Update ausfuehren (git pull + Requirements + Neustart).",
     }
@@ -386,109 +615,207 @@ def _get_local_ip() -> str:
         return "127.0.0.1"
 
 
+def _get_mac_address() -> str:
+    mac_int = _uuid_mod.getnode()
+    return ":".join(f"{(mac_int >> (8 * i)) & 0xff:02x}" for i in range(5, -1, -1))
+
+
+def _portal_headers(portal: dict) -> dict[str, str]:
+    api_key = str(portal.get("api_key") or "").strip()
+    client_id = str(portal.get("client_id") or "").strip()
+    return {
+        "X-Client-Id":      client_id,
+        "X-Jarvis-Api-Key": api_key,
+        "X-API-Key":        api_key,
+        "Authorization":    f"Bearer {api_key}",
+        "Content-Type":     "application/json",
+    }
+
+
+def _do_portal_heartbeat(cfg: Optional[dict] = None) -> dict:
+    config = cfg or _load_portal_config()
+    portal = config.get("portal") if isinstance(config.get("portal"), dict) else {}
+    portal_url = str(portal.get("url") or "").strip()
+    client_id  = str(portal.get("client_id") or "").strip()
+    api_key    = str(portal.get("api_key") or "").strip()
+    if not portal_url or not client_id or not api_key:
+        return {"ok": False, "error": "not_registered", "message": "Nicht registriert."}
+
+    manifest = _service_manifest()
+    payload = {
+        "status":     "online",
+        "version":    str(manifest.get("service", {}).get("version") or "2026.04"),
+        "hostname":   socket.gethostname(),
+        "localIp":    _get_local_ip(),
+        "capabilities": {"display_output": True, "overlay_output": True},
+        "lastSeenAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    try:
+        resp = requests.post(
+            f"{portal_url.rstrip('/')}/api/jarvis/node/heartbeat",
+            json=payload,
+            headers=_portal_headers(portal),
+            timeout=10,
+        )
+        data = resp.json()
+        return {"ok": bool(data.get("ok")), "response": data}
+    except Exception as exc:
+        return {"ok": False, "error": "portal_unreachable", "message": str(exc)}
+
+
+_heartbeat_started = False
+
+
+def _start_heartbeat_thread() -> None:
+    global _heartbeat_started
+    if _heartbeat_started:
+        return
+    _heartbeat_started = True
+
+    def _loop() -> None:
+        while True:
+            time.sleep(300)
+            try:
+                _do_portal_heartbeat()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_loop, daemon=True, name="portal-heartbeat")
+    t.start()
+
+
 def _do_portal_sync(cfg: Optional[dict] = None) -> dict:
     config = cfg or _load_portal_config()
     portal = config.get("portal") if isinstance(config.get("portal"), dict) else {}
     portal_url = str(portal.get("url") or "").strip()
-    node_uuid = str(portal.get("node_uuid") or "").strip()
-    client_id = str(portal.get("client_id") or "").strip()
-    api_key = str(portal.get("api_key") or "").strip()
-    if not portal_url or not node_uuid or not client_id or not api_key:
-        return {"ok": False, "error": "not_registered", "message": "Portal-Credentials fehlen. POST /api/portal/register zuerst."}
+    client_id  = str(portal.get("client_id") or "").strip()
+    api_key    = str(portal.get("api_key") or "").strip()
+    if not portal_url or not client_id or not api_key:
+        return {"ok": False, "error": "not_registered",
+                "message": "Portal-Credentials fehlen. POST /api/portal/register zuerst."}
 
-    manifest = _service_manifest()
-    local_ip = _get_local_ip()
-    capabilities = manifest.get("capabilities", [])
+    manifest    = _service_manifest()
+    local_ip    = _get_local_ip()
     endpoint_map = manifest.get("endpoints", {})
+    version     = str(manifest.get("service", {}).get("version") or "2026.04")
+    base_url    = f"http://{local_ip}:{FLASK_PORT}"
+
+    capabilities_map = {
+        "display_output": True,
+        "overlay_output": True,
+    }
+    capability_catalog = [
+        {
+            "key":                         "display_output",
+            "name":                        "Karten-Ausgabe",
+            "description":                 "Zeigt Karten, Routen und POIs als visuelle Ausgabe (MapLibre/TileServer).",
+            "enabled":                     True,
+            "requires_connector":          False,
+            "connector_groups":            [],
+            "required_connector_group_key": None,
+        },
+        {
+            "key":                         "overlay_output",
+            "name":                        "Geo-Overlay",
+            "description":                 "Überlagert Karten mit Geocoding-Ergebnissen, Isochronen und POI-Markern.",
+            "enabled":                     True,
+            "requires_connector":          False,
+            "connector_groups":            [],
+            "required_connector_group_key": None,
+        },
+    ]
+
     api_sections = [
         {
             "section": "Geocoding",
             "endpoints": [
-                {"method": "POST", "path": "/api/geocode",         "url": endpoint_map.get("geocode", ""),         "description": "Adresse/Ort suchen"},
-                {"method": "POST", "path": "/api/geocode/suggest", "url": endpoint_map.get("geocode_suggest", ""), "description": "Live-Autocomplete für Adressen"},
-                {"method": "POST", "path": "/api/reverse",         "url": endpoint_map.get("reverse", ""),         "description": "Koordinaten zu Adresse"},
-                {"method": "POST", "path": "/api/distance",        "url": endpoint_map.get("distance", ""),        "description": "Haversine-Distanz und Peilung"},
+                {"method": "POST", "path": "/api/geocode",         "url": endpoint_map.get("geocode", ""),         "description": "Adresse/Ort suchen (Nominatim + POI-Fallback)"},
+                {"method": "POST", "path": "/api/geocode/suggest", "url": endpoint_map.get("geocode_suggest", ""), "description": "Live-Autocomplete für Adressen (ab 2 Zeichen)"},
+                {"method": "POST", "path": "/api/reverse",         "url": endpoint_map.get("reverse", ""),         "description": "Koordinaten → Adresse (Reverse-Geocoding)"},
+                {"method": "GET",  "path": "/api/geo/geocode",     "url": endpoint_map.get("geo_geocode", ""),     "description": "Weather-Lab Geo-Bridge: Ort/Adresse → lat/lon"},
+                {"method": "GET",  "path": "/api/geo/reverse",     "url": endpoint_map.get("geo_reverse", ""),     "description": "Weather-Lab Geo-Bridge: lat/lon → Adresse/Ort"},
+                {"method": "GET",  "path": "/api/geo/resolve-location", "url": endpoint_map.get("geo_resolve_location", ""), "description": "Weather-Lab Geo-Bridge: robuste Ortsauflösung"},
+                {"method": "GET",  "path": "/api/geo/health",      "url": endpoint_map.get("geo_health", ""),      "description": "Geo-Bridge Health inkl. Cache/Provider"},
+                {"method": "GET",  "path": "/api/geo/capabilities", "url": endpoint_map.get("geo_capabilities", ""), "description": "Geo-Bridge Capabilities und Permission Keys"},
+                {"method": "POST", "path": "/api/distance",        "url": endpoint_map.get("distance", ""),        "description": "Haversine-Distanz + Kompass-Peilung (lokal)"},
             ],
         },
         {
             "section": "Routing",
             "endpoints": [
-                {"method": "POST", "path": "/api/route",     "url": endpoint_map.get("route", ""),     "description": "Routenplanung (car/foot/bike)"},
-                {"method": "POST", "path": "/api/isochrone", "url": endpoint_map.get("isochrone", ""), "description": "Reichweiten-Isochrone"},
-                {"method": "POST", "path": "/api/matrix",    "url": endpoint_map.get("matrix", ""),    "description": "Distanz-Matrix"},
+                {"method": "POST", "path": "/api/route",     "url": endpoint_map.get("route", ""),     "description": "A→B Routing (car/foot/bike), multi-stop, Turn-by-Turn"},
+                {"method": "POST", "path": "/api/isochrone", "url": endpoint_map.get("isochrone", ""), "description": "Reichweiten-Isochrone via ORS (Zeit oder Distanz)"},
+                {"method": "POST", "path": "/api/matrix",    "url": endpoint_map.get("matrix", ""),    "description": "Distanz-Matrix n×m via GraphHopper"},
             ],
         },
         {
             "section": "POI",
             "endpoints": [
-                {"method": "POST", "path": "/api/poi",            "url": endpoint_map.get("poi", ""),            "description": "POI in BBox suchen"},
-                {"method": "POST", "path": "/api/poi/radius",     "url": endpoint_map.get("poi_radius", ""),     "description": "POI-Umkreissuche (radius_km)"},
-                {"method": "GET",  "path": "/api/poi/categories", "url": endpoint_map.get("poi_categories", ""), "description": "POI-Kategorien"},
+                {"method": "POST", "path": "/api/poi",            "url": endpoint_map.get("poi", ""),            "description": "POI-Suche in BBox via Overpass"},
+                {"method": "POST", "path": "/api/poi/radius",     "url": endpoint_map.get("poi_radius", ""),     "description": "POI-Umkreissuche (Mittelpunkt + radius_km)"},
+                {"method": "GET",  "path": "/api/poi/categories", "url": endpoint_map.get("poi_categories", ""), "description": "Verfügbare POI-Kategorien"},
             ],
         },
         {
             "section": "Node",
             "endpoints": [
-                {"method": "GET", "path": "/health",               "url": endpoint_map.get("health", ""),   "description": "Healthcheck"},
-                {"method": "GET", "path": "/api/status",           "url": endpoint_map.get("status", ""),   "description": "Service-Status"},
-                {"method": "GET", "path": "/api/service-manifest", "url": endpoint_map.get("manifest", ""), "description": "Manifest"},
-                {"method": "GET", "path": "/info",                 "url": endpoint_map.get("info", ""),     "description": "API-Dokumentation"},
+                {"method": "GET",  "path": "/health",               "url": endpoint_map.get("health", ""),   "description": "Healthcheck aller Docker-Services"},
+                {"method": "GET",  "path": "/api/status",           "url": endpoint_map.get("status", ""),   "description": "Detaillierter Service-Status"},
+                {"method": "GET",  "path": "/api/service-manifest", "url": endpoint_map.get("manifest", ""), "description": "Node-Manifest mit Capabilities und Endpunkten"},
+                {"method": "GET",  "path": "/info",                 "url": endpoint_map.get("info", ""),     "description": "API-Dokumentation (UI)"},
+                {"method": "GET",  "path": "/api/update/status",    "url": f"{base_url}/api/update/status",  "description": "Update-Status prüfen (git fetch)"},
+                {"method": "POST", "path": "/api/update/apply",     "url": f"{base_url}/api/update/apply",   "description": "Update ausführen (git pull + Neustart)"},
+                {"method": "POST", "path": "/api/portal/heartbeat", "url": f"{base_url}/api/portal/heartbeat", "description": "Heartbeat ans Portal senden"},
+                {"method": "POST", "path": "/api/portal/sync",      "url": f"{base_url}/api/portal/sync",    "description": "Manueller Sync ans Family-Panel"},
             ],
         },
     ]
-    capabilities_map = {
-        "display_output": True,
-        "overlay_output": True,
-    }
+
     payload = {
-        "nodeUuid": node_uuid,
-        "clientId": client_id,
-        "capabilities": capabilities_map,
-        "capability_catalog": [{"key": key, "requires_connector": False} for key in capabilities_map.keys()],
-        "api_endpoints": api_sections,
+        "capabilities":      capabilities_map,
+        "capability_catalog": capability_catalog,
+        "api_endpoints":     api_sections,
         "services": [
             {
-                "name": "Jarvis OSM API",
-                "syncId": "jarvis-osm-api",
-                "serviceType": "other",
-                "protocol": "http",
-                "host": local_ip,
-                "port": FLASK_PORT,
-                "basePath": "/api",
-                "baseUrl": f"http://{local_ip}:{FLASK_PORT}",
-                "healthcheckPath": "/health",
-                "version": str(manifest.get("service", {}).get("version") or "2026.04"),
-                "serviceDescription": "OSM Lab: Geocoding, Reverse, Routing und POI-Suche (Overpass/Nominatim/GraphHopper).",
+                "name":               "Jarvis OSM API",
+                "syncId":             "jarvis-osm-api",
+                "serviceType":        "other",
+                "protocol":           "http",
+                "host":               local_ip,
+                "port":               FLASK_PORT,
+                "basePath":           "/api",
+                "baseUrl":            base_url,
+                "healthcheckPath":    "/health",
+                "version":            version,
+                "serviceDescription": (
+                    "Lokale Geo-API: Geocoding, Autocomplete, Reverse, "
+                    "Routing (GraphHopper), Isochrone (ORS), Distanz-Matrix, POI (Overpass)."
+                ),
                 "api_endpoints": api_sections,
                 "isEnabled": True,
-                "isOnline": True,
+                "isOnline":  True,
                 "metadata": {
-                    "routing": manifest.get("routing", {}),
-                    "capabilities_osm": capabilities,
+                    "routing":          manifest.get("routing", {}),
+                    "capabilities_osm": manifest.get("capabilities", []),
+                    "services": [svc["key"] for svc in SERVICES],
                 },
             }
         ],
         "network": {
-            "localIp": local_ip,
-            "apiBaseUrl": f"http://{local_ip}:{FLASK_PORT}",
-            "localUrl": f"http://{local_ip}:{FLASK_PORT}",
-            "healthEndpoint": endpoint_map.get("health", f"http://{local_ip}:{FLASK_PORT}/health"),
-            "locationName": socket.gethostname(),
+            "localIp":        local_ip,
+            "apiBaseUrl":     base_url,
+            "localUrl":       base_url,
+            "healthEndpoint": f"{base_url}/health",
+            "macAddress":     _get_mac_address(),
+            "locationName":   socket.gethostname(),
         },
     }
 
-    headers = {
-        "X-Client-Id": client_id,
-        "X-Jarvis-Api-Key": api_key,
-        "X-API-Key": api_key,
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
     try:
         resp = requests.post(
             f"{portal_url.rstrip('/')}/api/jarvis/node/sync",
             json=payload,
-            headers=headers,
+            headers=_portal_headers(portal),
             timeout=15,
         )
         data = resp.json()
@@ -1000,6 +1327,168 @@ def api_service_manifest():
 def api_catalog():
     return jsonify(ok=True, endpoints=_api_catalog_endpoints())
 
+
+@app.get("/api/geo/geocode")
+def api_geo_geocode():
+    query = (request.args.get("q") or "").strip()
+    if not query:
+        return _geo_error("missing_query", "Parameter q ist erforderlich.", 400, query=query)
+
+    cached = _geo_cache_get("geocode", query)
+    if cached:
+        cached["cached"] = True
+        cached["source"] = "local_cache"
+        return jsonify(cached)
+
+    try:
+        results = _geo_nominatim_search(query, limit=1)
+    except requests.exceptions.Timeout:
+        return _geo_error("geo_timeout", "Geo-Service Timeout.", 504, query=query, source=GEO_DEFAULT_PROVIDER)
+    except requests.exceptions.ConnectionError:
+        return _geo_error("geo_service_unreachable", "Nominatim/Geo-Service nicht erreichbar.", 503, query=query, source=GEO_DEFAULT_PROVIDER)
+    except ValueError as exc:
+        return _geo_error("geo_provider_invalid", str(exc), 500, query=query, source=GEO_DEFAULT_PROVIDER)
+    except Exception as exc:
+        return _geo_error("geo_service_error", str(exc), 502, query=query, source=GEO_DEFAULT_PROVIDER)
+
+    if not results:
+        return _geo_error("no_results", "Keine Treffer gefunden.", 404, query=query, source=GEO_DEFAULT_PROVIDER)
+
+    location = _geo_location_from_nominatim(results[0])
+    payload = _geo_response(query, location, GEO_DEFAULT_PROVIDER, False)
+    _geo_cache_set("geocode", query, payload)
+    return jsonify(payload)
+
+
+@app.get("/api/geo/reverse")
+def api_geo_reverse():
+    lat, lon, error = _geo_validate_lat_lon(request.args.get("lat"), request.args.get("lon"))
+    if error:
+        return _geo_error("invalid_coordinates", error, 400)
+    try:
+        zoom = max(0, min(18, int(request.args.get("zoom", "18") or "18")))
+    except ValueError:
+        return _geo_error("invalid_zoom", "zoom muss eine Zahl zwischen 0 und 18 sein.", 400)
+    query = f"{lat:.7f},{lon:.7f},z{zoom}"
+
+    cached = _geo_cache_get("reverse", query)
+    if cached:
+        cached["cached"] = True
+        cached["source"] = "local_cache"
+        return jsonify(cached)
+
+    try:
+        result = _geo_nominatim_reverse(lat, lon, zoom=zoom)
+    except requests.exceptions.Timeout:
+        return _geo_error("geo_timeout", "Geo-Service Timeout.", 504, query=query, source=GEO_DEFAULT_PROVIDER)
+    except requests.exceptions.ConnectionError:
+        return _geo_error("geo_service_unreachable", "Nominatim/Geo-Service nicht erreichbar.", 503, query=query, source=GEO_DEFAULT_PROVIDER)
+    except ValueError as exc:
+        return _geo_error("geo_provider_invalid", str(exc), 500, query=query, source=GEO_DEFAULT_PROVIDER)
+    except Exception as exc:
+        return _geo_error("geo_service_error", str(exc), 502, query=query, source=GEO_DEFAULT_PROVIDER)
+
+    if not result or result.get("error"):
+        return _geo_error("no_results", "Keine Adresse fuer diese Koordinaten gefunden.", 404, query=query, source=GEO_DEFAULT_PROVIDER)
+
+    location = _geo_location_from_nominatim(result)
+    payload = _geo_response(query, location, GEO_DEFAULT_PROVIDER, False)
+    _geo_cache_set("reverse", query, payload)
+    return jsonify(payload)
+
+
+@app.get("/api/geo/resolve-location")
+def api_geo_resolve_location():
+    query = (request.args.get("q") or "").strip()
+    if not query:
+        return _geo_error("missing_query", "Parameter q ist erforderlich.", 400, query=query)
+    return api_geo_geocode()
+
+
+@app.get("/api/geo/health")
+def api_geo_health():
+    provider_ok = False
+    http_code = 0
+    message = ""
+    base_url = _geo_provider_base_url()
+    if base_url:
+        try:
+            response = requests.get(
+                base_url + "/status.php",
+                timeout=GEO_TIMEOUT_SECONDS,
+                headers={"User-Agent": GEO_USER_AGENT},
+            )
+            http_code = response.status_code
+            provider_ok = response.status_code < 500
+            message = "ready" if response.status_code == 200 else response.text.strip()[:200]
+        except requests.exceptions.Timeout:
+            message = "timeout"
+        except requests.exceptions.ConnectionError:
+            message = "unreachable"
+        except Exception as exc:
+            message = str(exc)
+    else:
+        message = f"unsupported provider: {GEO_DEFAULT_PROVIDER}"
+
+    cache_entries = 0
+    with _GEO_CACHE_LOCK:
+        cache_entries = len(_geo_cache_load())
+
+    return jsonify({
+        "ok": provider_ok,
+        "provider": GEO_DEFAULT_PROVIDER,
+        "provider_base_url_configured": bool(base_url),
+        "provider_http_code": http_code,
+        "message": message,
+        "cache": {
+            "enabled": GEO_CACHE_TTL_SECONDS > 0,
+            "ttl_seconds": GEO_CACHE_TTL_SECONDS,
+            "entries": cache_entries,
+            "path": str(GEO_CACHE_PATH),
+        },
+        "timeout_seconds": GEO_TIMEOUT_SECONDS,
+    }), (200 if provider_ok else 503)
+
+
+@app.get("/api/geo/capabilities")
+def api_geo_capabilities():
+    return jsonify({
+        "ok": True,
+        "service": "jarvis-osm-lab",
+        "provider": GEO_DEFAULT_PROVIDER,
+        "cache_ttl_seconds": GEO_CACHE_TTL_SECONDS,
+        "timeout_seconds": GEO_TIMEOUT_SECONDS,
+        "endpoints": {
+            "geocode": "/api/geo/geocode?q=...",
+            "reverse": "/api/geo/reverse?lat=...&lon=...",
+            "resolve_location": "/api/geo/resolve-location?q=...",
+            "health": "/api/geo/health",
+            "capabilities": "/api/geo/capabilities",
+        },
+        "response_schema": {
+            "ok": True,
+            "query": "Duisburg",
+            "location": {
+                "label": "Duisburg, Deutschland",
+                "lat": 51.4344,
+                "lon": 6.7623,
+                "city": "Duisburg",
+                "district": "",
+                "country": "Deutschland",
+                "postcode": "",
+            },
+            "source": "nominatim|local_cache|fallback",
+            "cached": False,
+        },
+        "permissions": ["geo.read", "geo.resolve", "geo.health"],
+        "mcp_actions": [
+            {"name": "geo.geocode", "permission": "geo.resolve", "read_only": True},
+            {"name": "geo.reverse", "permission": "geo.read", "read_only": True},
+            {"name": "geo.resolve_location", "permission": "geo.resolve", "read_only": True},
+            {"name": "geo.health", "permission": "geo.health", "read_only": True},
+        ],
+    })
+
 @app.get("/api/portal/status")
 def api_portal_status():
     cfg = _load_portal_config()
@@ -1106,6 +1595,18 @@ def api_portal_sync():
             message=result.get("message", ""),
         ), 502
     return jsonify(ok=True, sync=result.get("response", {}))
+
+
+@app.post("/api/portal/heartbeat")
+def api_portal_heartbeat():
+    result = _do_portal_heartbeat()
+    if not result.get("ok"):
+        return jsonify(
+            ok=False,
+            error=result.get("error", "heartbeat_failed"),
+            message=result.get("message", ""),
+        ), 502
+    return jsonify(ok=True, heartbeat=result.get("response", {}))
 
 
 # ---------------------------------------------------------------------------
@@ -1937,4 +2438,5 @@ def api_matrix():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    _start_heartbeat_thread()
     app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG)

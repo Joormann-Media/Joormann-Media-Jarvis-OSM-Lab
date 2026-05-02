@@ -16,6 +16,7 @@ docker/.env
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 runtime/logs/
+runtime/cache/
 runtime/*.pid
 *.log
 
