@@ -16,7 +16,10 @@ from typing import Any, Dict, Optional
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context
+
+import mcp_registry
+from mcp_audit import write_mcp_audit
 
 BASE_DIR   = Path(__file__).resolve().parent
 CONFIG_DIR = BASE_DIR / "config"
@@ -56,6 +59,9 @@ GEO_CACHE_TTL_SECONDS = max(0, int(os.environ.get("GEO_CACHE_TTL_SECONDS", "8640
 GEO_TIMEOUT_SECONDS = max(1, int(os.environ.get("GEO_TIMEOUT_SECONDS", "5") or "5"))
 GEO_CACHE_PATH = Path(os.environ.get("GEO_CACHE_PATH", str(RUNTIME_DIR / "cache" / "geo-cache.json")))
 GEO_USER_AGENT = os.environ.get("GEO_USER_AGENT", "Joormann-OSM-Lab/1.0").strip() or "Joormann-OSM-Lab/1.0"
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+PORTAL_SERVICE_NAME = os.environ.get("PORTAL_SERVICE_NAME", "jarvis-osm-lab").strip() or "jarvis-osm-lab"
+PANEL_BRIDGE_ENABLED = os.environ.get("PANEL_BRIDGE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 _GEO_CACHE_LOCK = threading.RLock()
 
 app = Flask(__name__)
@@ -361,9 +367,96 @@ def _build_status() -> dict:
     return {"services": services}
 
 
+def _public_base_url() -> str:
+    return PUBLIC_BASE_URL or request.url_root.rstrip("/")
+
+
+def _geo_mcp_action_defs() -> list[dict[str, Any]]:
+    location_schema = {
+        "type": "object",
+        "properties": {"q": {"type": "string"}, "limit": {"type": "integer"}},
+        "required": ["q"],
+        "additionalProperties": True,
+    }
+    reverse_schema = {
+        "type": "object",
+        "properties": {"lat": {"type": "number"}, "lon": {"type": "number"}, "zoom": {"type": "integer"}},
+        "required": ["lat", "lon"],
+        "additionalProperties": True,
+    }
+    output_schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+    rows = [
+        ("geo.geocode", "Ort oder Adresse geocodieren.", "/api/geo/geocode", "geo.resolve", location_schema, ["geo", "geocode", "resolve", "read"]),
+        ("geo.reverse", "Koordinaten in Adresse oder Ort aufloesen.", "/api/geo/reverse", "geo.read", reverse_schema, ["geo", "reverse", "read"]),
+        ("geo.resolve_location", "Ort normalisiert fuer andere Labs aufloesen.", "/api/geo/resolve-location", "geo.resolve", location_schema, ["geo", "location", "resolve", "read"]),
+        ("geo.health", "Geo-Bridge Health-Status lesen.", "/api/geo/health", "geo.health", {}, ["geo", "health", "read"]),
+        ("geo.capabilities", "Geo-Capabilities und MCP-Vertrag lesen.", "/api/geo/capabilities", "geo.health", {}, ["geo", "capabilities", "read"]),
+    ]
+    actions: list[dict[str, Any]] = []
+    for name, description, endpoint, permission, input_schema, tags in rows:
+        actions.append({
+            "id": name,
+            "tool_name": name,
+            "name": name,
+            "display_name": description,
+            "description": description,
+            "enabled": True,
+            "phase": "readonly",
+            "provider": "geo",
+            "capability": name,
+            "operation": name.rsplit(".", 1)[-1],
+            "endpoint": endpoint,
+            "endpoint_template": endpoint + ("?q={q}" if "q" in input_schema.get("properties", {}) else "?lat={lat}&lon={lon}" if "lat" in input_schema.get("properties", {}) else ""),
+            "method": "GET",
+            "http_method": "GET",
+            "read_only": True,
+            "requires_confirmation": False,
+            "dry_run_supported": False,
+            "audit_enabled": True,
+            "permission": permission,
+            "permission_key": permission,
+            "required_params": input_schema.get("required", []) if isinstance(input_schema, dict) else [],
+            "optional_params": ["limit"] if name in {"geo.geocode", "geo.resolve_location"} else ["zoom"] if name == "geo.reverse" else [],
+            "input_schema": input_schema,
+            "output_schema": output_schema,
+            "risk_level": "low",
+            "tags": tags,
+        })
+    return actions
+
+
+def _load_or_seed_mcp_actions() -> list[dict[str, Any]]:
+    actions = mcp_registry.load_mcp_actions()
+    if not actions:
+        actions = _geo_mcp_action_defs()
+        mcp_registry.save_mcp_actions(actions)
+    normalized = mcp_registry.normalize_actions(actions)
+    if normalized != actions:
+        mcp_registry.save_mcp_actions(normalized)
+    return normalized
+
+
 def _service_manifest() -> dict:
-    base = request.url_root.rstrip("/")
+    base = _public_base_url()
+    actions = _load_or_seed_mcp_actions()
     return {
+        "ok": True,
+        "service_key": "jarvis-osm-lab",
+        "service_name": PORTAL_SERVICE_NAME,
+        "name": "Jarvis OSM-Lab",
+        "version": "2026.04",
+        "base_url": base,
+        "health_url": base + "/health",
+        "capabilities_url": base + "/api/capabilities",
+        "mcp_actions_url": base + "/api/mcp/actions",
+        "actions": actions,
+        "panel_bridge_enabled": PANEL_BRIDGE_ENABLED,
+        "service_meta": {
+            "name": "Joormann Media Jarvis OSM Lab",
+            "slug": "jarvis-osm-lab",
+            "version": "2026.04",
+            "runtime": "flask",
+        },
         "service": {
             "name": "Joormann Media Jarvis OSM Lab",
             "slug": "jarvis-osm-lab",
@@ -381,7 +474,10 @@ def _service_manifest() -> dict:
             "api_catalog": base + "/api",
             "status": base + "/api/status",
             "manifest": base + "/api/service-manifest",
+            "manifest_v2": base + "/api/manifest",
             "capabilities": base + "/api/capabilities",
+            "mcp_actions": base + "/api/mcp/actions",
+            "mcp_settings": base + "/api/mcp/settings",
             "geocode": base + "/api/geocode",
             "geocode_suggest": base + "/api/geocode/suggest",
             "reverse": base + "/api/reverse",
@@ -489,13 +585,27 @@ def _service_manifest() -> dict:
                 "capabilities": "/api/geo/capabilities",
             },
             "permissions": ["geo.read", "geo.resolve", "geo.health"],
-            "mcp_actions": [
-                {"name": "geo.geocode", "permission": "geo.resolve", "read_only": True},
-                {"name": "geo.reverse", "permission": "geo.read", "read_only": True},
-                {"name": "geo.resolve_location", "permission": "geo.resolve", "read_only": True},
-                {"name": "geo.health", "permission": "geo.health", "read_only": True},
-            ],
+            "mcp_actions": actions,
         },
+    }
+
+
+def _panel_manifest() -> dict:
+    manifest = _service_manifest()
+    return {
+        "ok": True,
+        "service": "jarvis-osm-lab",
+        "service_name": PORTAL_SERVICE_NAME,
+        "name": "Jarvis OSM-Lab",
+        "version": str(manifest.get("version") or "2026.04"),
+        "base_url": manifest.get("base_url"),
+        "health_url": manifest.get("health_url"),
+        "capabilities_url": manifest.get("capabilities_url"),
+        "mcp_actions_url": manifest.get("mcp_actions_url"),
+        "actions": manifest.get("actions") or [],
+        "capabilities": manifest.get("capabilities") or [],
+        "endpoints": manifest.get("endpoints") or {},
+        "panel_bridge_enabled": PANEL_BRIDGE_ENABLED,
     }
 
 
@@ -644,7 +754,7 @@ def _do_portal_heartbeat(cfg: Optional[dict] = None) -> dict:
     manifest = _service_manifest()
     payload = {
         "status":     "online",
-        "version":    str(manifest.get("service", {}).get("version") or "2026.04"),
+        "version":    str(manifest.get("version") or manifest.get("service", {}).get("version") or "2026.04"),
         "hostname":   socket.gethostname(),
         "localIp":    _get_local_ip(),
         "capabilities": {"display_output": True, "overlay_output": True},
@@ -697,7 +807,7 @@ def _do_portal_sync(cfg: Optional[dict] = None) -> dict:
     manifest    = _service_manifest()
     local_ip    = _get_local_ip()
     endpoint_map = manifest.get("endpoints", {})
-    version     = str(manifest.get("service", {}).get("version") or "2026.04")
+    version     = str(manifest.get("version") or manifest.get("service", {}).get("version") or "2026.04")
     base_url    = f"http://{local_ip}:{FLASK_PORT}"
 
     capabilities_map = {
@@ -1303,6 +1413,11 @@ def health():
     })
 
 
+@app.get("/api/health")
+def api_health():
+    return health()
+
+
 @app.route("/api/status")
 def api_status():
     return jsonify(_build_status())
@@ -1313,15 +1428,93 @@ def api_capabilities():
     manifest = _service_manifest()
     return jsonify({
         "service": manifest["service"],
+        "name": manifest["name"],
+        "version": manifest["version"],
         "capabilities": manifest["capabilities"],
         "routing": manifest["routing"],
         "endpoints": manifest["endpoints"],
+        "actions": manifest["actions"],
+        "mcp_actions_url": manifest["mcp_actions_url"],
     })
 
 
 @app.route("/api/service-manifest")
 def api_service_manifest():
     return jsonify(_service_manifest())
+
+
+@app.get("/api/manifest")
+def api_manifest():
+    return jsonify(_panel_manifest())
+
+
+@app.get("/api/mcp/actions")
+def api_mcp_actions():
+    actions = _load_or_seed_mcp_actions()
+    return jsonify(ok=True, count=len(actions), actions=actions)
+
+
+@app.route("/api/mcp/settings", methods=["GET", "POST"])
+def api_mcp_settings():
+    if request.method == "GET":
+        actions = _load_or_seed_mcp_actions()
+        return jsonify(ok=True, settings={"actions": actions}, count=len(actions), actions=actions)
+    body = request.get_json(silent=True) or {}
+    actions = body.get("actions")
+    if not isinstance(actions, list):
+        return jsonify(ok=False, error="bad_request", message="Field 'actions' must be a list."), 400
+    normalized = mcp_registry.normalize_actions(actions)
+    for action in normalized:
+        if not action.get("read_only"):
+            return jsonify(ok=False, error="bad_request", message="Geo MCP actions must stay read_only."), 400
+        if action.get("requires_confirmation"):
+            return jsonify(ok=False, error="bad_request", message="Geo MCP actions must not require confirmation."), 400
+    mcp_registry.save_mcp_actions(normalized)
+    write_mcp_audit("mcp_settings_save", {"count": len(normalized)})
+    return jsonify(ok=True, count=len(normalized), actions=normalized)
+
+
+@app.post("/api/mcp/actions/save")
+def api_mcp_actions_save():
+    return api_mcp_settings()
+
+
+@app.get("/api/mcp/export")
+def api_mcp_export():
+    actions = _load_or_seed_mcp_actions()
+    export = mcp_registry.export_enabled_mcp_tools(actions)
+    return jsonify(ok=True, **export)
+
+
+@app.route("/api/mcp/execute", methods=["GET", "POST"])
+def api_mcp_execute():
+    params = request.get_json(silent=True) if request.method == "POST" else request.args.to_dict()
+    params = params if isinstance(params, dict) else {}
+    action_name = str(params.get("action") or params.get("tool_name") or "").strip()
+    query = params.get("input") if isinstance(params.get("input"), dict) else params
+    actions = {str(a.get("tool_name") or a.get("name") or a.get("id")): a for a in _load_or_seed_mcp_actions() if a.get("enabled")}
+    action = actions.get(action_name)
+    if not action:
+        return jsonify(ok=False, error="unknown_action"), 404
+    write_mcp_audit("mcp_action_execute", {"action": action_name, "params": mcp_registry.mask_sensitive_data(query)})
+    path = str(action.get("endpoint") or "")
+    with app.test_request_context(path, query_string=query):
+        if action_name == "geo.geocode":
+            return api_geo_geocode()
+        if action_name == "geo.reverse":
+            return api_geo_reverse()
+        if action_name == "geo.resolve_location":
+            return api_geo_resolve_location()
+        if action_name == "geo.health":
+            return api_geo_health()
+        if action_name == "geo.capabilities":
+            return api_geo_capabilities()
+    return jsonify(ok=False, error="action_not_executable"), 400
+
+
+@app.get("/mcp-settings")
+def mcp_settings_page():
+    return render_template("mcp_settings.html")
 
 @app.get("/api")
 def api_catalog():
@@ -1481,12 +1674,7 @@ def api_geo_capabilities():
             "cached": False,
         },
         "permissions": ["geo.read", "geo.resolve", "geo.health"],
-        "mcp_actions": [
-            {"name": "geo.geocode", "permission": "geo.resolve", "read_only": True},
-            {"name": "geo.reverse", "permission": "geo.read", "read_only": True},
-            {"name": "geo.resolve_location", "permission": "geo.resolve", "read_only": True},
-            {"name": "geo.health", "permission": "geo.health", "read_only": True},
-        ],
+        "mcp_actions": _load_or_seed_mcp_actions(),
     })
 
 @app.get("/api/portal/status")
@@ -1529,7 +1717,7 @@ def api_portal_register():
         "type": "server",
         "os": platform.system().lower() or "linux",
         "platform": f"python-flask/{platform.python_version()}",
-        "version": _service_manifest()["service"]["version"],
+        "version": _service_manifest()["version"],
         "localIp": local_ip,
         "apiBaseUrl": f"http://{local_ip}:{FLASK_PORT}",
         "localUrl": f"http://{local_ip}:{FLASK_PORT}",

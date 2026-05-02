@@ -9,6 +9,9 @@ venv/
 # ── Env overrides ─────────────────────────────────────────────────────────────
 .env
 config/ports.local.env
+config/mcp_actions.local.json
+config/mcp_endpoints.local.json
+config/mcp_audit.local.jsonl
 config/osm.env.bak*
 
 # docker/.env wird vom Setup als Symlink auf ../config/osm.env erzeugt

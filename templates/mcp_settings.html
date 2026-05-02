@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MCP Settings - Jarvis OSM Lab</title>
+  <style>
+    :root{--bg:#081018;--surface:#122033;--border:#28435f;--text:#e6eef8;--muted:#89a1bb;--accent:#7dd3fc}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,sans-serif}
+    .navbar{background:rgba(10,18,30,.95);border-bottom:1px solid var(--border);padding:.85rem 1.5rem;display:flex;justify-content:space-between;position:sticky;top:0}
+    .navbar a{color:var(--muted);text-decoration:none;margin-left:1rem}.navbar .brand{color:var(--accent);font-weight:800;margin-left:0}
+    .wrap{max-width:1180px;margin:0 auto;padding:18px}.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px}
+    table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--border);padding:8px;text-align:left;vertical-align:top}th{color:var(--muted);font-size:.78rem}
+    code{color:#bfdbfe}.muted{color:var(--muted);font-size:.85rem}.btn{border:1px solid var(--border);background:#1f324d;color:var(--text);border-radius:8px;padding:8px 10px;cursor:pointer}.btn-primary{background:#0ea5e9;color:#071018}
+    input[type="checkbox"]{width:18px;height:18px} .status{margin-left:8px;color:var(--muted)}
+  </style>
+</head>
+<body>
+<nav class="navbar"><a class="brand" href="/">Jarvis OSM Lab</a><div><a href="/route">Routing</a><a href="/info">Info</a><a href="/mcp-settings">MCP</a></div></nav>
+<div class="wrap">
+  <div class="card">
+    <h2 style="margin:0">MCP Settings</h2>
+    <div class="muted">Read-only Geo Actions aus <code>config/mcp_actions.local.json</code></div>
+  </div>
+  <div class="card">
+    <button class="btn btn-primary" id="save">Speichern</button>
+    <button class="btn" id="reload">Neu laden</button>
+    <span class="status" id="status">-</span>
+  </div>
+  <div class="card">
+    <table><thead><tr><th>Action</th><th>Beschreibung</th><th>Endpoint</th><th>PermissionKey</th><th>Enabled</th><th>ReadOnly</th><th>Confirmation</th><th>Tags</th><th>Health</th></tr></thead><tbody id="rows"></tbody></table>
+  </div>
+</div>
+<script>
+let actions=[]; const esc=v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+async function jget(u){const r=await fetch(u,{headers:{Accept:'application/json'},cache:'no-store'});return r.json();}
+async function jpost(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(b||{})});return r.json();}
+function render(health){
+  const tb=document.getElementById('rows'); tb.innerHTML='';
+  actions.forEach((a,i)=>{const tr=document.createElement('tr');tr.innerHTML=`<td><code>${esc(a.name||a.tool_name||a.id)}</code></td><td>${esc(a.description)}</td><td><code>${esc(a.endpoint||a.endpoint_template)}</code></td><td><code>${esc(a.permission_key||a.permission)}</code></td><td><input type="checkbox" data-i="${i}" data-k="enabled" ${a.enabled?'checked':''}></td><td>${a.read_only?'yes':'no'}</td><td>${a.requires_confirmation?'yes':'no'}</td><td>${esc((a.tags||[]).join(', '))}</td><td>${esc(health?.status||health?.message||'-')}</td>`;tb.appendChild(tr);});
+  tb.querySelectorAll('input').forEach(inp=>inp.addEventListener('change',()=>{actions[Number(inp.dataset.i)][inp.dataset.k]=inp.checked;}));
+  document.getElementById('status').textContent=`${actions.length} Actions`;
+}
+async function load(){const [a,h]=await Promise.all([jget('/api/mcp/actions'),jget('/api/health')]);actions=a.actions||[];render(h);}
+document.getElementById('reload').onclick=load;
+document.getElementById('save').onclick=async()=>{const r=await jpost('/api/mcp/settings',{actions});document.getElementById('status').textContent=r.ok?'gespeichert':'Fehler';if(r.actions)actions=r.actions;render(await jget('/api/health'));};
+load();
+</script>
+</body>
+</html>
