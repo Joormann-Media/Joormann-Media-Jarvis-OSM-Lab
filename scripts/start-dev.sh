@@ -67,10 +67,10 @@ fi
 (
   cd "$PROJECT_ROOT"
   if [[ "$RUN_WITH_SG_DOCKER" == "1" ]]; then
-    setsid -f sg docker -c "$(printf 'cd %q && exec env FLASK_HOST=%q FLASK_PORT=%q FLASK_DEBUG=%q %q app.py' \
-      "$PROJECT_ROOT" "$FLASK_HOST" "$FLASK_PORT" "$FLASK_DEBUG" "$PYTHON_BIN")" >>"$LOG_FILE" 2>&1 </dev/null
+    setsid -f sg docker -c "$(printf 'cd %q && exec env FLASK_HOST=%q FLASK_PORT=%q HOST=%q PORT=%q FLASK_DEBUG=%q %q app.py' \
+      "$PROJECT_ROOT" "$FLASK_HOST" "$FLASK_PORT" "$FLASK_HOST" "$FLASK_PORT" "$FLASK_DEBUG" "$PYTHON_BIN")" >>"$LOG_FILE" 2>&1 </dev/null
   else
-    setsid -f env FLASK_HOST="$FLASK_HOST" FLASK_PORT="$FLASK_PORT" FLASK_DEBUG="$FLASK_DEBUG" \
+    setsid -f env FLASK_HOST="$FLASK_HOST" FLASK_PORT="$FLASK_PORT" HOST="$FLASK_HOST" PORT="$FLASK_PORT" FLASK_DEBUG="$FLASK_DEBUG" \
       "$PYTHON_BIN" app.py >>"$LOG_FILE" 2>&1 </dev/null
   fi
 )
